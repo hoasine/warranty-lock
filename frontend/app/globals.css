@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(0.12 0.02 220);
+  --foreground: oklch(0.96 0.01 200);
+  --card: oklch(0.18 0.03 220);
+  --card-foreground: oklch(0.96 0.01 200);
+  --popover: oklch(0.18 0.03 220);
+  --popover-foreground: oklch(0.96 0.01 200);
+  --primary: oklch(0.72 0.12 185);
+  --primary-foreground: oklch(0.12 0.03 220);
+  --secondary: oklch(0.2 0.03 220);
+  --secondary-foreground: oklch(0.92 0.01 200);
+  --muted: oklch(0.17 0.025 220);
+  --muted-foreground: oklch(0.62 0.03 210);
+  --accent: oklch(0.72 0.12 185);
+  --accent-foreground: oklch(0.12 0.03 220);
+  --amber: oklch(0.8 0.12 80);
+  --mint: oklch(0.74 0.12 165);
+  --peach: oklch(0.76 0.1 55);
+  --destructive: oklch(0.62 0.2 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.28 0.035 220);
+  --input: oklch(0.16 0.03 220);
+  --ring: oklch(0.72 0.12 185);
+  --radius: 0.5rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-amber: var(--amber);
+  --color-mint: var(--mint);
+  --color-peach: var(--peach);
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  body {
+    @apply text-foreground;
+    font-family: var(--font-body), sans-serif;
+    color-scheme: dark;
+  }
+  .font-display {
+    font-family: var(--font-display), var(--font-body), sans-serif;
+  }
+}
+
+@layer utilities {
+  .gradient-purple-pink {
+    background: linear-gradient(135deg, oklch(0.55 0.11 200), oklch(0.72 0.13 185) 55%, oklch(0.78 0.12 165));
+  }
+  .text-gradient {
+    background: linear-gradient(135deg, oklch(0.82 0.1 200), oklch(0.8 0.13 185));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .brand-card {
+    background: oklch(0.18 0.03 220 / 0.72);
+    border: 1px solid oklch(0.32 0.04 210 / 0.55);
+    border-radius: 0.5rem;
+  }
+  .soft-tile {
+    border-radius: 0.5rem;
+    border: 1px solid oklch(0.3 0.035 220 / 0.55);
+    background: oklch(0.16 0.028 220 / 0.85);
+  }
+}
+
+html {
+  min-height: 100vh;
+  color-scheme: dark;
+  background-color: #0a1218;
+  background-image:
+    radial-gradient(ellipse 80% 55% at 50% -18%, oklch(0.45 0.1 185 / 0.18), transparent 60%),
+    linear-gradient(180deg, #0a1218, #0c161c 48%, #0a1216);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: transparent;
+}

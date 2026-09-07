@@ -1,0 +1,15 @@
+.env
+.env.local
+.env.*.local
+.vercel
+frontend/.vercel
+.venv/
+venv/
+artifacts/
+__pycache__/
+*.pyc
+.pytest_cache/
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+frontend/tsconfig.tsbuildinfo
