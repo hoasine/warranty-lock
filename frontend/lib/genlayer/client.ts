@@ -82,7 +82,10 @@ export function getStudioUrl(): string {
 }
 
 export function getContractAddress(): string {
-  return process.env.NEXT_PUBLIC_CONTRACT_ADDRESS?.trim() || "";
+  return (
+    process.env.NEXT_PUBLIC_CONTRACT_ADDRESS?.trim() ||
+    "0x58a07635c18fD252572E7594e2b074B90Fe68499"
+  );
 }
 
 export function isValidContractAddress(address: string): boolean {
