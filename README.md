@@ -9,7 +9,7 @@
 | **Escrow the coverage. Lock the terms. File an attestation. AI classifies eligibility — the contract pays.** |
 
 [![Live App](https://img.shields.io/badge/Live-warranty--lock.vercel.app-0f172a?style=for-the-badge&logo=vercel)](https://warranty-lock.vercel.app)
-[![Contract](https://img.shields.io/badge/Contract-GenLayer_Python-1f6feb?style=for-the-badge)](#core-contract-api)
+[![Contract](https://img.shields.io/badge/Contract-0x58a07635…8499-1f6feb?style=for-the-badge)](#environment-variables)
 [![Frontend](https://img.shields.io/badge/Frontend-Next.js_+_TypeScript-111827?style=for-the-badge)](#project-structure)
 [![Network](https://img.shields.io/badge/Network-GenLayer_Studionet-16a34a?style=for-the-badge)](#environment-variables)
 
@@ -143,14 +143,14 @@ The Next.js app in `frontend/` mirrors contract guards instead of inventing extr
 Configure in `frontend/.env.local` (see `frontend/.env.example`):
 
 ```env
-NEXT_PUBLIC_CONTRACT_ADDRESS=
+NEXT_PUBLIC_CONTRACT_ADDRESS=0x58a07635c18fD252572E7594e2b074B90Fe68499
 NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
 NEXT_PUBLIC_GENLAYER_CHAIN_ID=61999
 NEXT_PUBLIC_GENLAYER_CHAIN_NAME=GenLayer Studionet
 NEXT_PUBLIC_GENLAYER_SYMBOL=GEN
 ```
 
-Deploy `contracts/warranty_lock.py` in GenLayer Studio, then set `NEXT_PUBLIC_CONTRACT_ADDRESS` locally and on Vercel.
+This Studionet address is the live app target. After contract source changes, redeploy `contracts/warranty_lock.py` and update `NEXT_PUBLIC_CONTRACT_ADDRESS` here, in `frontend/.env*`, and on Vercel.
 
 ## Local Development
 
@@ -160,7 +160,7 @@ npm install
 npm run dev
 ```
 
-Deploy the contract first, then update `NEXT_PUBLIC_CONTRACT_ADDRESS`.
+Use the Studionet address above, or deploy `contracts/warranty_lock.py` and update `NEXT_PUBLIC_CONTRACT_ADDRESS`.
 
 ## Tests
 
@@ -178,6 +178,7 @@ The direct suite covers authorization, self-dealing, duplicate serials, exact es
 
 - Live app: [https://warranty-lock.vercel.app](https://warranty-lock.vercel.app)
 - GitHub: [https://github.com/hoasine/warranty-lock](https://github.com/hoasine/warranty-lock)
+- Contract (Studionet): [`0x58a07635c18fD252572E7594e2b074B90Fe68499`](https://studio.genlayer.com)
 - Source: `contracts/warranty_lock.py`
 
 ## Disclaimer
