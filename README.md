@@ -132,7 +132,7 @@ The safest policy drafting style names covered failures, exclusions, required at
 
 ```text
 contracts/   # GenLayer intelligent contract (Python)
-frontend/    # Next.js application (TypeScript)
+frontend/    # Next.js application (TypeScript) — Vercel Root Directory
 tests/       # Direct contract tests
 ```
 
