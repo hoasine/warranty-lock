@@ -13,7 +13,7 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata: Metadata = {
   title: "WarrantyLock — Escrowed warranty claims",
   description:
-    "Sellers escrow coverage for one buyer and serial. Buyers file immutable attestations. AI decides eligibility only; the contract pays the requested amount.",
+    "Sellers escrow coverage for one buyer and serial. Buyers file a public HTTPS evidence snapshot. AI decides eligibility only; the contract pays the requested amount. Fetching a URL is not manufacturer authentication.",
   icons: { icon: [{ url: "/favicon.svg", type: "image/svg+xml" }] },
 };
 

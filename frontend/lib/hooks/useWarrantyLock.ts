@@ -159,10 +159,22 @@ export function useWarrantyWrites() {
         warrantyId: number,
         requested: bigint,
         reason: string,
-        evidence: string,
+        evidenceType: string,
+        evidenceUrl: string,
+        serialPreimage: string,
         stake: bigint,
         onProgress?: (p: TransactionProgress) => void
-      ) => c.fileClaim(warrantyId, requested, reason, evidence, stake, onProgress)
+      ) =>
+        c.fileClaim(
+          warrantyId,
+          requested,
+          reason,
+          evidenceType,
+          evidenceUrl,
+          serialPreimage,
+          stake,
+          onProgress
+        )
     ),
     respond: useWrite(
       client,

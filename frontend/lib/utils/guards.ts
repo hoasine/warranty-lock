@@ -146,3 +146,32 @@ export function validateCreateInputs(input: {
   if (input.durationSeconds > maxDur) return "duration above maximum";
   return null;
 }
+
+export function validateEvidenceUrl(value: string): string | null {
+  const url = value.trim();
+  if (!url) return "evidence_url is required";
+  if (url.length > 500) return "evidence_url exceeds maximum length 500";
+  if (url.includes(",") || url.includes("\n") || url.includes("\\")) {
+    return "evidence_url must be a single HTTPS URL";
+  }
+  if (!url.toLowerCase().startsWith("https://")) return "evidence_url must start with https://";
+  const rest = url.split("://")[1] ?? "";
+  const authority = rest.split(/[/?#]/)[0] ?? "";
+  if (authority.includes("@")) return "Evidence URLs cannot contain user credentials";
+  const host = authority.includes("[")
+    ? authority.slice(authority.indexOf("[") + 1, authority.indexOf("]")).toLowerCase()
+    : authority.split(":")[0].toLowerCase();
+  if (
+    !host ||
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host === "127.0.0.1" ||
+    host.startsWith("10.") ||
+    host.startsWith("192.168.") ||
+    host === "::1"
+  ) {
+    return "Private or local URLs are not allowed";
+  }
+  return null;
+}

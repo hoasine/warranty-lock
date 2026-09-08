@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { hashSerialText, isSerialHash, normalizeSerialHash } from "./serial.ts";
+import { hashSerialPreimage, hashSerialText, isSerialHash, normalizeSerialHash } from "./serial.ts";
 
 describe("serial hash", () => {
   it("normalizes 0x-prefixed 64 hex", () => {
@@ -17,5 +17,12 @@ describe("serial hash", () => {
     const hash = await hashSerialText("SN-12345");
     assert.equal(hash.length, 64);
     assert.equal(isSerialHash(hash), true);
+  });
+
+  it("always hashes a claim preimage, even if it looks like hex", async () => {
+    const hexLooking = "a".repeat(64);
+    const hashed = await hashSerialPreimage(hexLooking);
+    assert.notEqual(hashed, hexLooking);
+    assert.equal(hashed, await hashSerialPreimage("  " + hexLooking + "  "));
   });
 });

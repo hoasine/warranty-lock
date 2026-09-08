@@ -85,7 +85,8 @@ export function CreateWarrantyForm() {
       <p className="text-sm text-muted-foreground md:col-span-2">
         You send exactly the coverage amount. The named buyer must accept before the activation
         deadline. Claim stake later is exactly {minStake} GEN. Terms lock at create — there is no
-        amend path.
+        amend path. Enter the real product serial; the buyer must type the same string when filing a
+        claim. Fetching a later evidence URL does not authenticate the manufacturer.
       </p>
       <div className="space-y-2">
         <Label htmlFor="buyer">Buyer address</Label>
@@ -96,12 +97,12 @@ export function CreateWarrantyForm() {
         <Input id="product" value={product} onChange={(e) => setProduct(e.target.value)} maxLength={200} required />
       </div>
       <div className="space-y-2 md:col-span-2">
-        <Label htmlFor="serial">Serial or 64-hex hash</Label>
+        <Label htmlFor="serial">Product serial</Label>
         <Input
           id="serial"
           value={serial}
           onChange={(e) => setSerial(e.target.value)}
-          placeholder="Paste 64 hex characters, or a serial that will be SHA-256 hashed"
+          placeholder="The buyer will re-enter this exact serial when claiming"
           required
         />
       </div>

@@ -18,13 +18,34 @@ export function isSerialHash(value: string): boolean {
   }
 }
 
-export async function hashSerialText(value: string): Promise<string> {
-  const text = value.trim();
-  if (!text) throw new Error("Serial text is required");
-  if (isSerialHash(text)) return normalizeSerialHash(text);
-  const bytes = new TextEncoder().encode(text);
+export async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
+
+export async function hashSerialPreimage(value: string): Promise<string> {
+  const text = value.trim();
+  if (!text) throw new Error("serial_preimage is required");
+  if (text.length > 200) throw new Error("serial_preimage exceeds maximum length 200");
+  return sha256Hex(text);
+}
+
+export async function hashSerialText(value: string): Promise<string> {
+  const text = value.trim();
+  if (!text) throw new Error("Serial text is required");
+  if (isSerialHash(text)) return normalizeSerialHash(text);
+  return sha256Hex(text);
+}
+
+export const EVIDENCE_TYPES = [
+  "MANUFACTURER",
+  "REPAIRER",
+  "INVOICE",
+  "TELEMETRY",
+  "INSPECTION",
+] as const;
+
+export type EvidenceType = (typeof EVIDENCE_TYPES)[number];

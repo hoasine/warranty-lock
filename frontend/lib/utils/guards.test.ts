@@ -11,6 +11,7 @@ import {
   canRespondToClaim,
   canTimeoutClaim,
   validateCreateInputs,
+  validateEvidenceUrl,
 } from "./guards.ts";
 
 const seller = "0x1111111111111111111111111111111111111111";
@@ -50,7 +51,10 @@ function claim(overrides: Partial<WarrantyClaimView> = {}): WarrantyClaimView {
     buyer,
     requested_amount: "30",
     reason: "failed",
-    evidence: "attestation",
+    evidence_type: "INVOICE",
+    evidence_url: "https://example.com/invoice",
+    evidence_snapshot: "invoice text",
+    serial_preimage: "WL-TEST-DEVICE-001",
     seller_response: "",
     stake: "10",
     created_at: 50,
@@ -133,5 +137,13 @@ describe("warranty action guards", () => {
     assert.match(validateCreateInputs({ ...base, buyer: seller }) ?? "", /themselves/);
     assert.match(validateCreateInputs({ ...base, buyer: "0x" + "0".repeat(40) }) ?? "", /zero/);
     assert.match(validateCreateInputs({ ...base, terms: "x".repeat(4001) }) ?? "", /terms/);
+  });
+
+  it("rejects http, private, and credential evidence URLs", () => {
+    assert.equal(validateEvidenceUrl("https://example.com/invoice"), null);
+    assert.match(validateEvidenceUrl("http://example.com/invoice") ?? "", /https/);
+    assert.match(validateEvidenceUrl("https://localhost/invoice") ?? "", /Private/);
+    assert.match(validateEvidenceUrl("https://127.0.0.1/invoice") ?? "", /Private/);
+    assert.match(validateEvidenceUrl("https://user:pass@example.com/x") ?? "", /credentials/);
   });
 });

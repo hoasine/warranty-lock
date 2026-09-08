@@ -22,7 +22,9 @@ import {
   canRespondToClaim,
   canTimeoutClaim,
   nowEpoch,
+  validateEvidenceUrl,
 } from "@/lib/utils/guards";
+import { EVIDENCE_TYPES, hashSerialPreimage } from "@/lib/utils/serial";
 import { error, success } from "@/lib/utils/toast";
 import { friendlyTxError } from "@/components/RateLimitNotice";
 
@@ -36,7 +38,9 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
   const now = nowEpoch();
   const [requested, setRequested] = useState("");
   const [reason, setReason] = useState("");
-  const [evidence, setEvidence] = useState("");
+  const [evidenceType, setEvidenceType] = useState<(typeof EVIDENCE_TYPES)[number]>("INVOICE");
+  const [evidenceUrl, setEvidenceUrl] = useState("");
+  const [serialPreimage, setSerialPreimage] = useState("");
   const [response, setResponse] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -74,12 +78,31 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
         error("reason is required and must be at most 2000 characters");
         return;
       }
-      if (!evidence.trim() || evidence.trim().length > 4000) {
-        error("evidence is required and must be at most 4000 characters");
+      const urlProblem = validateEvidenceUrl(evidenceUrl);
+      if (urlProblem) {
+        error(urlProblem);
+        return;
+      }
+      const serial = serialPreimage.trim();
+      if (!serial || serial.length > 200) {
+        error("Re-enter the product serial (max 200 characters)");
+        return;
+      }
+      const hashed = await hashSerialPreimage(serial);
+      if (hashed !== warranty.serial_hash.toLowerCase()) {
+        error("Serial does not match the locked serial hash");
         return;
       }
       await run("Claim filed", () =>
-        writes.file.mutateAsync([warranty.id, amount, reason.trim(), evidence.trim(), minStake])
+        writes.file.mutateAsync([
+          warranty.id,
+          amount,
+          reason.trim(),
+          evidenceType,
+          evidenceUrl.trim(),
+          serial,
+          minStake,
+        ])
       );
     } catch (err) {
       error("Claim failed", { description: friendlyTxError(err) });
@@ -136,6 +159,11 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
             {openClaim.paid_out ? " · paid" : ""}
           </p>
           <p>Requested {formatGen(openClaim.requested_amount)} GEN</p>
+          {openClaim.evidence_type && (
+            <p className="text-muted-foreground">
+              {openClaim.evidence_type} snapshot · {openClaim.evidence_url}
+            </p>
+          )}
           <p className="text-muted-foreground">{openClaim.reason}</p>
           {openClaim.seller_response && (
             <p className="text-muted-foreground">Seller: {openClaim.seller_response}</p>
@@ -217,7 +245,10 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
         <div className="soft-tile grid gap-3 p-4">
           <p className="text-sm font-medium">File a claim · stake exactly {formatGen(minStake)} GEN</p>
           <p className="text-xs text-muted-foreground">
-            Evidence is an immutable attestation, not a verified physical inspection.
+            The contract snapshots one public HTTPS page at file time. A COVERED payout requires
+            that snapshot to include this product serial and both amount tokens (GEN decimal and
+            wei). Fetching a URL is not manufacturer authentication, a signed invoice, or a repairer
+            login.
           </p>
           <div className="space-y-2">
             <Label htmlFor={`req-${warranty.id}`}>Requested payout (GEN)</Label>
@@ -228,8 +259,38 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
             <Textarea id={`reason-${warranty.id}`} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={2000} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor={`ev-${warranty.id}`}>Attestation ({evidence.trim().length}/4000)</Label>
-            <Textarea id={`ev-${warranty.id}`} value={evidence} onChange={(e) => setEvidence(e.target.value)} maxLength={4000} />
+            <Label htmlFor={`type-${warranty.id}`}>Evidence class</Label>
+            <select
+              id={`type-${warranty.id}`}
+              value={evidenceType}
+              onChange={(e) => setEvidenceType(e.target.value as (typeof EVIDENCE_TYPES)[number])}
+              className="border-border bg-card h-10 w-full rounded-lg border px-3 py-1 text-sm"
+            >
+              {EVIDENCE_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`url-${warranty.id}`}>Public HTTPS evidence URL</Label>
+            <Input
+              id={`url-${warranty.id}`}
+              value={evidenceUrl}
+              onChange={(e) => setEvidenceUrl(e.target.value)}
+              placeholder="https://…"
+              maxLength={500}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`serial-${warranty.id}`}>Product serial (preimage)</Label>
+            <Input
+              id={`serial-${warranty.id}`}
+              value={serialPreimage}
+              onChange={(e) => setSerialPreimage(e.target.value)}
+              maxLength={200}
+            />
           </div>
           <Button disabled={busy} onClick={onFile}>
             File claim

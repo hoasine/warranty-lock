@@ -5,7 +5,7 @@ export function HowItWorks() {
     {
       n: "1",
       title: "Seller escrows coverage",
-      body: "Create names one buyer, a 32-byte serial hash, locked terms/exclusions, and sends exactly the coverage limit. Terms cannot be edited later.",
+      body: "Create names one buyer, a product serial (hashed on-chain), locked terms/exclusions, and sends exactly the coverage limit. Terms cannot be edited later. The buyer must re-enter the same serial to file a claim.",
     },
     {
       n: "2",
@@ -15,17 +15,17 @@ export function HowItWorks() {
     {
       n: "3",
       title: "One open claim at a time",
-      body: "The buyer files an on-chain attestation plus the exact 0.01 GEN claim stake. Requested payout must stay within remaining coverage.",
+      body: "The buyer files one public HTTPS evidence URL plus the exact 0.01 GEN claim stake. The contract snapshots that page and requires the serial and requested amount to appear in the snapshot. Requested payout must stay within remaining coverage.",
     },
     {
       n: "4",
       title: "Seller reply or approve",
-      body: "The seller can respond once before the 3-day window, or approve and pay the requested amount without AI.",
+      body: "The seller can respond once before the 3-day window, or approve the requested amount without AI — but only if the same snapshotted evidence package is intact.",
     },
     {
       n: "5",
       title: "AI eligibility, contract money",
-      body: "Anyone may judge after a reply or after the response deadline, until the judge grace ends. Then timeout returns the stake as INCONCLUSIVE. COVERED pays the requested amount. Close after expiry is permissionless so leftover coverage cannot stay trapped.",
+      body: "Anyone may judge after a reply or after the response deadline, until the judge grace ends. COVERED is refused unless the snapshot, evidence class, serial bind, and amount bind all pass; otherwise the result is INCONCLUSIVE. Timeout returns the stake. Close after expiry is permissionless so leftover coverage cannot stay trapped.",
     },
   ];
 

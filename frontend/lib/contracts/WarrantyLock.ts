@@ -41,7 +41,10 @@ export type WarrantyClaimView = {
   buyer: string;
   requested_amount: number | string;
   reason: string;
-  evidence: string;
+  evidence_type: string;
+  evidence_url: string;
+  evidence_snapshot: string;
+  serial_preimage: string;
   seller_response: string;
   stake: number | string;
   created_at: number;
@@ -409,13 +412,22 @@ export class WarrantyLockClient {
     warrantyId: number,
     requestedAmountWei: bigint,
     reason: string,
-    evidence: string,
+    evidenceType: string,
+    evidenceUrl: string,
+    serialPreimage: string,
     stakeWei: bigint,
     onProgress?: (progress: TransactionProgress) => void
   ) {
     return this.write(
       "file_claim",
-      [warrantyId, requestedAmountWei.toString(), reason, evidence],
+      [
+        warrantyId,
+        requestedAmountWei.toString(),
+        reason,
+        evidenceType,
+        evidenceUrl,
+        serialPreimage,
+      ],
       stakeWei,
       FAST_TX_WAIT,
       onProgress
