@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useProtocolConfig, useWarrantyWrites } from "@/lib/hooks/useWarrantyLock";
 import { formatGen, parseGenToWei } from "@/lib/utils/format";
-import { hashSerialText } from "@/lib/utils/serial";
+import { hashSerialText, EVIDENCE_TYPES } from "@/lib/utils/serial";
 import { validateCreateInputs } from "@/lib/utils/guards";
 import { error, success } from "@/lib/utils/toast";
 import { friendlyTxError } from "@/components/RateLimitNotice";
@@ -29,6 +29,8 @@ export function CreateWarrantyForm() {
   const [coverage, setCoverage] = useState("0.10");
   const [activationDays, setActivationDays] = useState("1");
   const [durationDays, setDurationDays] = useState("365");
+  const [evidenceType, setEvidenceType] = useState<(typeof EVIDENCE_TYPES)[number]>("INVOICE");
+  const [issuer, setIssuer] = useState("");
   const [busy, setBusy] = useState(false);
 
   const minStake = formatGen(config?.minimum_claim_stake ?? "10000000000000000");
@@ -48,6 +50,8 @@ export function CreateWarrantyForm() {
       const problem = validateCreateInputs({
         seller: address,
         buyer,
+        issuer,
+        evidenceType,
         productName: product,
         serialHash,
         terms,
@@ -70,6 +74,8 @@ export function CreateWarrantyForm() {
         coverageWei,
         activationSeconds,
         durationSeconds,
+        evidenceType,
+        issuer.trim(),
       ]);
       success("Warranty offered. Coverage is now escrowed.");
     } catch (err) {
@@ -84,9 +90,9 @@ export function CreateWarrantyForm() {
       <h2 className="font-display text-xl font-semibold md:col-span-2">Offer a warranty</h2>
       <p className="text-sm text-muted-foreground md:col-span-2">
         You send exactly the coverage amount. The named buyer must accept before the activation
-        deadline. Claim stake later is exactly {minStake} GEN. Terms lock at create — there is no
-        amend path. Enter the real product serial; the buyer must type the same string when filing a
-        claim. Fetching a later evidence URL does not authenticate the manufacturer.
+        deadline. Claim stake later is exactly {minStake} GEN. Pin an issuer wallet and evidence
+        class now — a COVERED payout later requires that wallet to attest the claim. That
+        authenticates the pinned key, not a manufacturer login or signed invoice.
       </p>
       <div className="space-y-2">
         <Label htmlFor="buyer">Buyer address</Label>
@@ -95,6 +101,31 @@ export function CreateWarrantyForm() {
       <div className="space-y-2">
         <Label htmlFor="product">Product</Label>
         <Input id="product" value={product} onChange={(e) => setProduct(e.target.value)} maxLength={200} required />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="issuer">Issuer wallet</Label>
+        <Input
+          id="issuer"
+          value={issuer}
+          onChange={(e) => setIssuer(e.target.value)}
+          placeholder="Pinned manufacturer, repairer, invoice, telemetry, or inspector address"
+          required
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="evidenceType">Evidence class</Label>
+        <select
+          id="evidenceType"
+          value={evidenceType}
+          onChange={(e) => setEvidenceType(e.target.value as (typeof EVIDENCE_TYPES)[number])}
+          className="border-border bg-card h-10 w-full rounded-lg border px-3 py-1 text-sm"
+        >
+          {EVIDENCE_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {type}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="space-y-2 md:col-span-2">
         <Label htmlFor="serial">Product serial</Label>

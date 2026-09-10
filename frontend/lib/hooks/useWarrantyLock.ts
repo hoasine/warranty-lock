@@ -125,6 +125,8 @@ export function useWarrantyWrites() {
         coverageWei: bigint,
         activationSeconds: number,
         durationSeconds: number,
+        evidenceType: string,
+        issuer: string,
         onProgress?: (p: TransactionProgress) => void
       ) =>
         c.createWarranty(
@@ -136,6 +138,8 @@ export function useWarrantyWrites() {
           coverageWei,
           activationSeconds,
           durationSeconds,
+          evidenceType,
+          issuer,
           onProgress
         )
     ),
@@ -159,22 +163,16 @@ export function useWarrantyWrites() {
         warrantyId: number,
         requested: bigint,
         reason: string,
-        evidenceType: string,
-        evidenceUrl: string,
         serialPreimage: string,
         stake: bigint,
         onProgress?: (p: TransactionProgress) => void
-      ) =>
-        c.fileClaim(
-          warrantyId,
-          requested,
-          reason,
-          evidenceType,
-          evidenceUrl,
-          serialPreimage,
-          stake,
-          onProgress
-        )
+      ) => c.fileClaim(warrantyId, requested, reason, serialPreimage, stake, onProgress)
+    ),
+    attest: useWrite(
+      client,
+      invalidate,
+      (c, claimId: number, onProgress?: (p: TransactionProgress) => void) =>
+        c.attestClaim(claimId, onProgress)
     ),
     respond: useWrite(
       client,

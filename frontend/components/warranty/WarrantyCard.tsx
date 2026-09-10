@@ -15,6 +15,7 @@ import {
   asWei,
   canAcceptWarranty,
   canApproveClaim,
+  canAttestClaim,
   canCancelUnaccepted,
   canCloseWarranty,
   canFileClaim,
@@ -22,9 +23,8 @@ import {
   canRespondToClaim,
   canTimeoutClaim,
   nowEpoch,
-  validateEvidenceUrl,
 } from "@/lib/utils/guards";
-import { EVIDENCE_TYPES, hashSerialPreimage } from "@/lib/utils/serial";
+import { hashSerialPreimage } from "@/lib/utils/serial";
 import { error, success } from "@/lib/utils/toast";
 import { friendlyTxError } from "@/components/RateLimitNotice";
 
@@ -38,8 +38,6 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
   const now = nowEpoch();
   const [requested, setRequested] = useState("");
   const [reason, setReason] = useState("");
-  const [evidenceType, setEvidenceType] = useState<(typeof EVIDENCE_TYPES)[number]>("INVOICE");
-  const [evidenceUrl, setEvidenceUrl] = useState("");
   const [serialPreimage, setSerialPreimage] = useState("");
   const [response, setResponse] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,6 +48,7 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
   const canCancel = canCancelUnaccepted(warranty, address, now);
   const canFile = canFileClaim(warranty, address, now);
   const canRespond = canRespondToClaim(warranty, liveClaim, address, now);
+  const canAttest = canAttestClaim(warranty, liveClaim, address);
   const canApprove = canApproveClaim(warranty, liveClaim, address);
   const canJudge = canJudgeClaim(liveClaim, now);
   const canTimeout = canTimeoutClaim(liveClaim, now);
@@ -78,11 +77,6 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
         error("reason is required and must be at most 2000 characters");
         return;
       }
-      const urlProblem = validateEvidenceUrl(evidenceUrl);
-      if (urlProblem) {
-        error(urlProblem);
-        return;
-      }
       const serial = serialPreimage.trim();
       if (!serial || serial.length > 200) {
         error("Re-enter the product serial (max 200 characters)");
@@ -94,15 +88,7 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
         return;
       }
       await run("Claim filed", () =>
-        writes.file.mutateAsync([
-          warranty.id,
-          amount,
-          reason.trim(),
-          evidenceType,
-          evidenceUrl.trim(),
-          serial,
-          minStake,
-        ])
+        writes.file.mutateAsync([warranty.id, amount, reason.trim(), serial, minStake])
       );
     } catch (err) {
       error("Claim failed", { description: friendlyTxError(err) });
@@ -125,6 +111,10 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
         <p>
           Buyer <AddressDisplay address={warranty.buyer} showCopy />
         </p>
+        <p>
+          Issuer <AddressDisplay address={warranty.issuer} showCopy />
+        </p>
+        <p>Evidence class {warranty.evidence_type || "—"}</p>
         <p>
           Coverage {formatGen(warranty.coverage_remaining)} / {formatGen(warranty.coverage_limit)} GEN
         </p>
@@ -159,11 +149,10 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
             {openClaim.paid_out ? " · paid" : ""}
           </p>
           <p>Requested {formatGen(openClaim.requested_amount)} GEN</p>
-          {openClaim.evidence_type && (
-            <p className="text-muted-foreground">
-              {openClaim.evidence_type} snapshot · {openClaim.evidence_url}
-            </p>
-          )}
+          <p className="text-muted-foreground">
+            {openClaim.evidence_type}
+            {openClaim.attested ? " · issuer attested" : " · waiting for issuer attest"}
+          </p>
           <p className="text-muted-foreground">{openClaim.reason}</p>
           {openClaim.seller_response && (
             <p className="text-muted-foreground">Seller: {openClaim.seller_response}</p>
@@ -190,6 +179,11 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
             onClick={() => run("Unaccepted warranty cancelled", () => writes.cancel.mutateAsync([warranty.id]))}
           >
             Return escrow to seller
+          </Button>
+        )}
+        {canAttest && liveClaim && (
+          <Button disabled={busy} onClick={() => run("Claim attested", () => writes.attest.mutateAsync([liveClaim.id]))}>
+            Attest as issuer
           </Button>
         )}
         {canApprove && openClaim && (
@@ -245,10 +239,8 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
         <div className="soft-tile grid gap-3 p-4">
           <p className="text-sm font-medium">File a claim · stake exactly {formatGen(minStake)} GEN</p>
           <p className="text-xs text-muted-foreground">
-            The contract snapshots one public HTTPS page at file time. A COVERED payout requires
-            that snapshot to include this product serial and both amount tokens (GEN decimal and
-            wei). Fetching a URL is not manufacturer authentication, a signed invoice, or a repairer
-            login.
+            Reason is narrative only. A COVERED payout requires the locked issuer wallet to attest
+            this claim. That authenticates the pinned key, not a manufacturer login or signed invoice.
           </p>
           <div className="space-y-2">
             <Label htmlFor={`req-${warranty.id}`}>Requested payout (GEN)</Label>
@@ -257,31 +249,6 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
           <div className="space-y-2">
             <Label htmlFor={`reason-${warranty.id}`}>Reason ({reason.trim().length}/2000)</Label>
             <Textarea id={`reason-${warranty.id}`} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={2000} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={`type-${warranty.id}`}>Evidence class</Label>
-            <select
-              id={`type-${warranty.id}`}
-              value={evidenceType}
-              onChange={(e) => setEvidenceType(e.target.value as (typeof EVIDENCE_TYPES)[number])}
-              className="border-border bg-card h-10 w-full rounded-lg border px-3 py-1 text-sm"
-            >
-              {EVIDENCE_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={`url-${warranty.id}`}>Public HTTPS evidence URL</Label>
-            <Input
-              id={`url-${warranty.id}`}
-              value={evidenceUrl}
-              onChange={(e) => setEvidenceUrl(e.target.value)}
-              placeholder="https://…"
-              maxLength={500}
-            />
           </div>
           <div className="space-y-2">
             <Label htmlFor={`serial-${warranty.id}`}>Product serial (preimage)</Label>

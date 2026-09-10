@@ -6,10 +6,10 @@
 
 | **WarrantyLock Platform** |
 |---|
-| **Escrow the coverage. Lock the terms. Snapshot public evidence. AI classifies eligibility — the contract pays.** |
+| **Escrow the coverage. Pin an issuer wallet. AI classifies eligibility — the contract pays.** |
 
 [![Live App](https://img.shields.io/badge/Live-warranty--lock.vercel.app-0f172a?style=for-the-badge&logo=vercel)](https://warranty-lock.vercel.app)
-[![Contract](https://img.shields.io/badge/Contract-0xCc7c6544…892B-1f6feb?style=for-the-badge)](#environment-variables)
+[![Contract](https://img.shields.io/badge/Contract-0xA6223E73…E095-1f6feb?style=for-the-badge)](#environment-variables)
 [![Frontend](https://img.shields.io/badge/Frontend-Next.js_+_TypeScript-111827?style=for-the-badge)](#project-structure)
 [![Network](https://img.shields.io/badge/Network-GenLayer_Studionet-16a34a?style=for-the-badge)](#environment-variables)
 
@@ -19,32 +19,33 @@
 
 ## Overview
 
-WarrantyLock is a GenLayer intelligent contract for escrow-backed product warranties. A seller locks the complete coverage limit before making an offer to one buyer. If the buyer accepts, the policy text becomes the immutable basis for later claims.
+WarrantyLock is a GenLayer intelligent contract for escrow-backed product warranties. A seller locks the complete coverage limit before making an offer to one buyer, and pins one issuer wallet plus an evidence class. If the buyer accepts, the policy text and issuer become the immutable basis for later claims.
 
-The AI has one narrow responsibility: classify an open claim as `COVERED`, `NOT_COVERED`, or `INCONCLUSIVE`. It never chooses the amount paid.
+The AI has one narrow responsibility: classify an open claim as `COVERED`, `NOT_COVERED`, or `INCONCLUSIVE`. It never chooses the amount paid. A `COVERED` payout also requires an on-chain `attest_claim` from the locked issuer. That authenticates the pinned key, not a manufacturer login, signed invoice, or brand PKI.
 
 Normal warranty promises can fail when the seller disappears, rewrites the terms, delays until coverage expires, or agrees that a defect is covered but does not pay. WarrantyLock separates the subjective policy decision from deterministic custody.
 
 ## Core Value Proposition
 
 - **Escrow before accept:** coverage is locked per warranty before the buyer consents
-- **Pinned policy:** terms, exclusions, evidence snapshot, and seller response cannot be edited
+- **Pinned policy:** terms, exclusions, evidence class, issuer wallet, and seller response cannot be edited
 - **Exact funding:** create sends `msg.value == coverage_limit`; claims stake exactly `0.01 GEN`
 - **Eligibility only:** validators agree on a verdict; contract branches decide every transfer
 - **Non-overlapping windows:** accept/cancel, file/close, respond/judge/timeout never share an instant
 - **Permissionless exits:** unused offers, timed-out claims, and leftover coverage cannot stay trapped
-- **Evidence gate:** a COVERED payout requires a public HTTPS snapshot that binds the serial and requested amount. Fetching a URL is not manufacturer authentication.
+- **Issuer attest gate:** a COVERED payout requires the locked issuer wallet to attest that claim. This authenticates the pinned key, not a manufacturer login or signed invoice.
 
 ## Protocol Flow
 
-1. **Seller creates a warranty** — names one buyer, a 32-byte serial hash, terms/exclusions, and sends exactly the coverage limit
-2. **Buyer accepts** before `activation_deadline`, which starts `expires_at = accepted_at + duration`
+1. **Seller creates a warranty** — names one buyer, a 32-byte serial hash, terms/exclusions, an evidence class (`MANUFACTURER` | `REPAIRER` | `INVOICE` | `TELEMETRY` | `INSPECTION`), a pinned issuer wallet, and sends exactly the coverage limit. Issuer ≠ zero and ≠ buyer. Seller may equal issuer.
+2. **Buyer accepts** before `activation_deadline`, which starts `expires_at = accepted_at + duration`. Accepting also accepts that pinned issuer.
 3. **If the buyer never accepts**, anyone may `cancel_unaccepted` after the deadline and refund the seller
-4. **Buyer files a claim** while `ACTIVE`, with no open claim, `now < expires_at`, requested ≤ remaining, exact claim stake, a required evidence class, one public HTTPS URL, and the serial preimage. The contract snapshots the page and reverts if the snapshot is empty or does not contain the serial and amount tokens
-5. **Seller responds once** before `response_deadline`, or **approves** the requested amount without AI only if that evidence package is still intact
-6. **Anyone may `judge_claim`** after a reply or at `now >= response_deadline`, and only while `now < judge_deadline`. `COVERED` is forced to `INCONCLUSIVE` unless the package, class, serial bind, and amount bind all pass
-7. **Anyone may `timeout_claim`** at `now >= judge_deadline` — `INCONCLUSIVE`, stake returns to the buyer
-8. **Anyone may `close_warranty`** after expiry when no claim is open — leftover coverage always returns to the seller
+4. **Buyer files a claim** while `ACTIVE`, with no open claim, `now < expires_at`, requested ≤ remaining, exact claim stake, and the serial preimage that SHA-256-matches the locked hash. Reason text is narrative only. Evidence class is copied from the warranty. A public web page cannot release coverage.
+5. **Locked issuer calls `attest_claim`** once while the claim is `OPEN`. The transaction binds warranty, claim, serial, amount, and type.
+6. **Seller responds once** before `response_deadline`, or **approves** the requested amount without AI only after that attest
+7. **Anyone may `judge_claim`** after a reply or at `now >= response_deadline`, and only while `now < judge_deadline`. `COVERED` without issuer attest is forced to `INCONCLUSIVE` and does not pay coverage
+8. **Anyone may `timeout_claim`** at `now >= judge_deadline` — `INCONCLUSIVE`, stake returns to the buyer
+9. **Anyone may `close_warranty`** after expiry when no claim is open — leftover coverage always returns to the seller
 
 Statuses:
 
@@ -56,7 +57,7 @@ Statuses:
 Settlement:
 
 - `COVERED` or manual approval pays exactly `requested_amount` from that warranty's coverage and returns the stake to the buyer
-- Seller `approve_claim` uses the same evidence-package gate as an AI `COVERED` verdict
+- Seller `approve_claim` reverts unless the issuer has attested
 - `NOT_COVERED` leaves coverage unchanged and transfers the fixed stake to the seller
 - `INCONCLUSIVE` or timeout leaves coverage unchanged and returns the stake to the buyer
 
@@ -64,19 +65,17 @@ Settlement:
 
 | Risk | Mitigation in WarrantyLock |
 |------|----------------------------|
-| Seller rewrites terms after the buyer relies on them | Terms and exclusions lock at `create_warranty`; no policy-update method |
+| Seller rewrites terms after the buyer relies on them | Terms, exclusions, evidence class, and issuer lock at `create_warranty`; no policy-update method |
 | Seller never funds the promise | Create is payable and requires `msg.value == coverage_limit` |
 | Self-deal / zero-address offer | Seller ≠ buyer; zero address rejected |
+| Issuer is the buyer | Issuer ≠ buyer and ≠ zero |
 | Duplicate serial reuse while live | Same seller + normalized serial blocked until `CANCELLED` or `CLOSED` |
 | Coverage clock starts before consent | `expires_at` is set only on buyer `accept_warranty` |
 | Unused offer traps seller funds | Permissionless `cancel_unaccepted` after `activation_deadline` |
 | Claim after expiry | `file_claim` requires `now < expires_at` |
-| Oversize / truncated evidence | Reason, URL, and snapshot are rejected if oversized, not silently trimmed |
+| Oversize / truncated narrative | Reason and seller response are rejected if oversized, not silently trimmed |
 | Unauthenticated claim text | Free-text reason is narrative only; it cannot release coverage |
-| HTTP / private / credential URLs | `file_claim` allows one `https://` URL with no userinfo and no private/local host |
-| Empty or failed page fetch | Snapshot uses `gl.eq_principle.strict_eq`; empty/failed fetch reverts the claim |
-| Snapshot missing serial or amount | File reverts unless the snapshot contains the serial preimage, the wei token, and the GEN decimal token |
-| AI or seller pays without a bind | `judge_claim` forces `INCONCLUSIVE` and `approve_claim` reverts unless `_evidence_package_ok` |
+| AI or seller pays without issuer attest | `approve_claim` reverts; `judge_claim` forces `INCONCLUSIVE`; `_settle_claim` COVERED also requires `_issuer_attested` |
 | Accidental oversized stake | Claim stake must exactly equal `minimum_claim_stake` (0.01 GEN) |
 | Seller silence blocks the buyer | Judge is allowed after reply or at `response_deadline` |
 | AFK judge / validator deadlock | Permissionless `timeout_claim` after `judge_deadline` |
@@ -101,22 +100,21 @@ Time boundaries do not overlap:
 
 ## Threat model and limitations
 
-WarrantyLock protects on-chain authorization, escrow accounting, immutable policy text, time windows, deterministic transfer outcomes, and a **public-page snapshot bind**.
+WarrantyLock protects on-chain authorization, escrow accounting, immutable policy text, time windows, deterministic transfer outcomes, and a **pinned-issuer attest**.
 
-It does **not** authenticate a manufacturer, repairer, invoice issuer, telemetry device, or inspector. A successful fetch means validators agreed on the page text at file time. It does not mean the page was signed, that the product failed, or that the buyer owns the serial.
+It does **not** authenticate a manufacturer login, repairer credential, invoice issuer identity, telemetry device, inspector, signed PDF, or brand PKI. A successful `attest_claim` means the locked issuer wallet signed that transaction. It does not mean the product failed, that an inspection happened, or that the buyer owns the serial.
 
 Remaining fraud and honest limits:
 
-1. Anyone can publish fake public HTML that contains the serial and GEN amount, then declare `INVOICE` (or any other class).
-2. A stolen real invoice that already contains the serial can be hosted and snapshotted.
-3. Filing a claim publishes the raw serial; that string can be copied onto a fake page.
-4. A long page can coincidentally contain `0.03` or the wei digit string.
-5. The live site can change after file time; only the snapshot is locked.
-6. Semantic prompt injection in the fetched page can still produce a valid `COVERED` if every validator follows it; JSON escaping only stops structural breakout.
-7. Vague locked terms plus a plausible snapshot can still be classified as covered.
-8. Seller–buyer collusion plus a bind-passing fake page can still use `approve_claim`.
-9. There are no issuer signatures; unofficial “manufacturer” PDFs or HTML are indistinguishable from a forge.
-10. Timeout / `INCONCLUSIVE` does not steal coverage; it only returns the claim stake.
+1. The seller can pin an issuer wallet they control.
+2. Buyer accept is also accepting that issuer.
+3. A compromised issuer key or a rogue employee can attest a false claim.
+4. A real issuer can collude with the buyer.
+5. Attest is not physical failure or inspection.
+6. Vague locked terms plus a valid attest can still be classified as covered.
+7. Seller == issuer can self-attest.
+8. There is no brand PKI, signed PDF, or device certificate.
+9. Timeout / `INCONCLUSIVE` does not steal coverage; it only returns the claim stake.
 
 Other explicit limitations:
 
@@ -126,18 +124,19 @@ Other explicit limitations:
 - `INCONCLUSIVE` refunds the stake but does not compensate either party
 - there is no amendment, appeal, top-up, assignment, or buyer claim-cancellation path in this version
 
-The safest policy drafting style names covered failures, exclusions, required public evidence, and objective limits directly. Do not describe this protocol as verified manufacturer evidence.
+The safest policy drafting style names covered failures, exclusions, required issuer role, and objective limits directly. Do not describe this protocol as verified manufacturer evidence.
 
 ## Core Contract API
 
 | Function | Type | Description |
 |----------|------|-------------|
-| `create_warranty` | write (payable) | Escrow exact coverage for one buyer + serial hash; lock terms |
+| `create_warranty` | write (payable) | Escrow exact coverage for one buyer + serial hash; lock terms, evidence class, and issuer |
 | `accept_warranty` | write | Named buyer starts the coverage clock before the activation deadline |
 | `cancel_unaccepted` | write | Permissionless refund to seller after the activation deadline |
-| `file_claim` | write (payable) | Buyer files one HTTPS evidence URL + serial preimage + exact `0.01 GEN` stake; snapshot must bind serial and amount |
+| `file_claim` | write (payable) | Buyer files serial preimage + exact `0.01 GEN` stake; reason is narrative only |
+| `attest_claim` | write | Locked issuer wallet attests the open claim once; required before COVERED |
 | `respond_to_claim` | write | Seller replies once before `response_deadline` |
-| `approve_claim` | write | Seller pays the requested amount without AI only if the evidence package is intact |
+| `approve_claim` | write | Seller pays the requested amount without AI only after issuer attest |
 | `judge_claim` | write | Permissionless AI eligibility verdict before `judge_deadline` |
 | `timeout_claim` | write | Permissionless `INCONCLUSIVE` after `judge_deadline` |
 | `close_warranty` | write | Permissionless leftover-coverage refund after expiry, no open claim |
@@ -154,21 +153,21 @@ frontend/    # Next.js application (TypeScript) — Vercel Root Directory
 tests/       # Direct contract tests
 ```
 
-The Next.js app in `frontend/` mirrors contract guards instead of inventing extra policy. Evidence copy in the UI says public-page snapshot, not verified manufacturer, repairer, or signed-invoice authentication.
+The Next.js app in `frontend/` mirrors contract guards instead of inventing extra policy. Evidence copy in the UI says pinned-issuer attest, not verified manufacturer, repairer, or signed-invoice authentication.
 
 ## Environment Variables
 
 Configure in `frontend/.env.local` (see `frontend/.env.example`):
 
 ```env
-NEXT_PUBLIC_CONTRACT_ADDRESS=0xCc7c65448cF0FAA3C2057e770D5cD29a5411892B
+NEXT_PUBLIC_CONTRACT_ADDRESS=0xA6223E73bFEb2379bb146643214df568984cE095
 NEXT_PUBLIC_GENLAYER_RPC_URL=https://studio.genlayer.com/api
 NEXT_PUBLIC_GENLAYER_CHAIN_ID=61999
 NEXT_PUBLIC_GENLAYER_CHAIN_NAME=GenLayer Studionet
 NEXT_PUBLIC_GENLAYER_SYMBOL=GEN
 ```
 
-This Studionet address is the live app target. After contract source changes, redeploy `contracts/warranty_lock.py` and update `NEXT_PUBLIC_CONTRACT_ADDRESS` here, in `frontend/.env*`, and on Vercel.
+This Studionet address is the live issuer-attest contract. After contract source changes, redeploy `contracts/warranty_lock.py` and update `NEXT_PUBLIC_CONTRACT_ADDRESS` here, in `frontend/.env*`, and on Vercel.
 
 ## Local Development
 
@@ -190,15 +189,15 @@ cd frontend
 npm test
 ```
 
-The direct suite covers authorization, self-dealing, duplicate serials, exact escrow, zero address, acceptance/cancellation boundaries, immutable and bounded text, expiry races, single-open-claim behavior, exact claim stake, seller response timing, all verdicts, invalid model output, prompt delimiter escaping, manual approval, double settlement, exhausted coverage, close guards, tracked liabilities, transfer recipients and amounts, validator disagreement, cross-warranty isolation, HTTPS/private URL rejection, snapshot bind failures, and COVERED/approve evidence gates.
+The direct suite covers authorization, self-dealing, duplicate serials, exact escrow, zero address, acceptance/cancellation boundaries, immutable and bounded text, expiry races, single-open-claim behavior, exact claim stake, seller response timing, all verdicts, invalid model output, prompt delimiter escaping, issuer attest, manual approval, double settlement, exhausted coverage, close guards, tracked liabilities, transfer recipients and amounts, validator disagreement, cross-warranty isolation, and COVERED/approve issuer gates.
 
 ## Links
 
 - Live app: [https://warranty-lock.vercel.app](https://warranty-lock.vercel.app)
 - GitHub: [https://github.com/hoasine/warranty-lock](https://github.com/hoasine/warranty-lock)
-- Contract (Studionet): [`0xCc7c65448cF0FAA3C2057e770D5cD29a5411892B`](https://studio.genlayer.com)
+- Contract (Studionet): [`0xA6223E73bFEb2379bb146643214df568984cE095`](https://studio.genlayer.com)
 - Source: `contracts/warranty_lock.py`
 
 ## Disclaimer
 
-Prototype/demo software for warranty-escrow experiments on GenLayer Studionet. Not financial, legal, insurance, or consumer-protection advice. A public HTTPS snapshot is not proof of a physical defect and is not manufacturer authentication.
+Prototype/demo software for warranty-escrow experiments on GenLayer Studionet. Not financial, legal, insurance, or consumer-protection advice. A pinned-issuer attest is not proof of a physical defect and is not manufacturer authentication.

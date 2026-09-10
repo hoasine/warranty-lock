@@ -19,8 +19,8 @@ export default function HomePage() {
               Warranty<span className="text-gradient">Lock</span>
             </h1>
             <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
-              Escrow the coverage. Lock the terms. Snapshot public evidence. AI classifies coverage —
-              the contract decides the money.
+              Escrow the coverage. Pin an issuer wallet. AI classifies coverage — the contract
+              decides the money.
             </p>
           </header>
           <WarrantyApp />

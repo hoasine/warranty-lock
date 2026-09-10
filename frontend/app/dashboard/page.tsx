@@ -19,7 +19,7 @@ export default function DashboardPage() {
               Warranty<span className="text-gradient">Lock</span>
             </h1>
             <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
-              Create, accept, claim, respond, approve, judge, or close.
+              Create, accept, claim, attest, respond, approve, judge, or close.
             </p>
           </header>
           <WarrantyApp />

@@ -4,6 +4,7 @@ import type { WarrantyClaimView, WarrantyView } from "../contracts/WarrantyLock.
 import {
   canAcceptWarranty,
   canApproveClaim,
+  canAttestClaim,
   canCancelUnaccepted,
   canCloseWarranty,
   canFileClaim,
@@ -11,17 +12,19 @@ import {
   canRespondToClaim,
   canTimeoutClaim,
   validateCreateInputs,
-  validateEvidenceUrl,
 } from "./guards.ts";
 
 const seller = "0x1111111111111111111111111111111111111111";
 const buyer = "0x2222222222222222222222222222222222222222";
+const issuer = "0x3333333333333333333333333333333333333333";
 
 function warranty(overrides: Partial<WarrantyView> = {}): WarrantyView {
   return {
     id: 0,
     seller,
     buyer,
+    issuer,
+    evidence_type: "INVOICE",
     product_name: "Unit",
     serial_hash: "a".repeat(64),
     terms: "terms",
@@ -52,9 +55,9 @@ function claim(overrides: Partial<WarrantyClaimView> = {}): WarrantyClaimView {
     requested_amount: "30",
     reason: "failed",
     evidence_type: "INVOICE",
-    evidence_url: "https://example.com/invoice",
-    evidence_snapshot: "invoice text",
     serial_preimage: "WL-TEST-DEVICE-001",
+    attested: false,
+    attested_at: 0,
     seller_response: "",
     stake: "10",
     created_at: 50,
@@ -113,18 +116,24 @@ describe("warranty action guards", () => {
     assert.equal(canCloseWarranty({ ...active, has_open_claim: true }, seller, 200), false);
   });
 
-  it("lets the seller approve an open claim", () => {
-    assert.equal(canApproveClaim(warranty({ status: "ACTIVE" }), claim(), seller), true);
+  it("lets the seller approve only after issuer attest", () => {
+    const active = warranty({ status: "ACTIVE" });
+    assert.equal(canApproveClaim(active, claim(), seller), false);
+    assert.equal(canApproveClaim(active, claim({ attested: true }), seller), true);
     assert.equal(
-      canApproveClaim(warranty({ status: "ACTIVE" }), claim({ paid_out: true }), seller),
+      canApproveClaim(active, claim({ attested: true, paid_out: true }), seller),
       false
     );
+    assert.equal(canAttestClaim(active, claim(), issuer), true);
+    assert.equal(canAttestClaim(active, claim({ attested: true }), issuer), false);
   });
 
   it("rejects self-deal and oversized create inputs", () => {
     const base = {
       seller,
       buyer,
+      issuer,
+      evidenceType: "INVOICE",
       productName: "Unit",
       serialHash: "a".repeat(64),
       terms: "terms",
@@ -136,14 +145,7 @@ describe("warranty action guards", () => {
     assert.equal(validateCreateInputs(base), null);
     assert.match(validateCreateInputs({ ...base, buyer: seller }) ?? "", /themselves/);
     assert.match(validateCreateInputs({ ...base, buyer: "0x" + "0".repeat(40) }) ?? "", /zero/);
+    assert.match(validateCreateInputs({ ...base, issuer: buyer }) ?? "", /Issuer cannot be the buyer/);
     assert.match(validateCreateInputs({ ...base, terms: "x".repeat(4001) }) ?? "", /terms/);
-  });
-
-  it("rejects http, private, and credential evidence URLs", () => {
-    assert.equal(validateEvidenceUrl("https://example.com/invoice"), null);
-    assert.match(validateEvidenceUrl("http://example.com/invoice") ?? "", /https/);
-    assert.match(validateEvidenceUrl("https://localhost/invoice") ?? "", /Private/);
-    assert.match(validateEvidenceUrl("https://127.0.0.1/invoice") ?? "", /Private/);
-    assert.match(validateEvidenceUrl("https://user:pass@example.com/x") ?? "", /credentials/);
   });
 });

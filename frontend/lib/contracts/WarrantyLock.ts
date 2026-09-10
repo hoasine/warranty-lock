@@ -15,6 +15,8 @@ export type WarrantyView = {
   id: number;
   seller: string;
   buyer: string;
+  issuer: string;
+  evidence_type: string;
   product_name: string;
   serial_hash: string;
   terms: string;
@@ -42,9 +44,9 @@ export type WarrantyClaimView = {
   requested_amount: number | string;
   reason: string;
   evidence_type: string;
-  evidence_url: string;
-  evidence_snapshot: string;
   serial_preimage: string;
+  attested: boolean;
+  attested_at: number;
   seller_response: string;
   stake: number | string;
   created_at: number;
@@ -380,6 +382,8 @@ export class WarrantyLockClient {
     coverageWei: bigint,
     activationWindowSeconds: number,
     durationSeconds: number,
+    evidenceType: string,
+    issuer: string,
     onProgress?: (progress: TransactionProgress) => void
   ) {
     return this.write(
@@ -393,6 +397,8 @@ export class WarrantyLockClient {
         coverageWei.toString(),
         activationWindowSeconds,
         durationSeconds,
+        evidenceType,
+        issuer,
       ],
       coverageWei,
       FAST_TX_WAIT,
@@ -412,26 +418,21 @@ export class WarrantyLockClient {
     warrantyId: number,
     requestedAmountWei: bigint,
     reason: string,
-    evidenceType: string,
-    evidenceUrl: string,
     serialPreimage: string,
     stakeWei: bigint,
     onProgress?: (progress: TransactionProgress) => void
   ) {
     return this.write(
       "file_claim",
-      [
-        warrantyId,
-        requestedAmountWei.toString(),
-        reason,
-        evidenceType,
-        evidenceUrl,
-        serialPreimage,
-      ],
+      [warrantyId, requestedAmountWei.toString(), reason, serialPreimage],
       stakeWei,
       FAST_TX_WAIT,
       onProgress
     );
+  }
+
+  attestClaim(claimId: number, onProgress?: (progress: TransactionProgress) => void) {
+    return this.write("attest_claim", [claimId], 0n, FAST_TX_WAIT, onProgress);
   }
 
   respondToClaim(

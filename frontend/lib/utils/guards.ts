@@ -69,7 +69,22 @@ export function canApproveClaim(
     claim &&
       sameAddress(address, warranty.seller) &&
       claim.status === "OPEN" &&
-      !claim.paid_out
+      !claim.paid_out &&
+      claim.attested
+  );
+}
+
+export function canAttestClaim(
+  warranty: WarrantyView,
+  claim: WarrantyClaimView | undefined,
+  address?: string | null
+): boolean {
+  return Boolean(
+    claim &&
+      sameAddress(address, warranty.issuer) &&
+      claim.status === "OPEN" &&
+      !claim.paid_out &&
+      !claim.attested
   );
 }
 
@@ -115,6 +130,8 @@ export function canCloseWarranty(
 export function validateCreateInputs(input: {
   seller?: string | null;
   buyer: string;
+  issuer: string;
+  evidenceType: string;
   productName: string;
   serialHash: string;
   terms: string;
@@ -125,9 +142,16 @@ export function validateCreateInputs(input: {
   config?: ProtocolConfig;
 }): string | null {
   const buyer = input.buyer.trim();
+  const issuer = input.issuer.trim();
   if (!/^0x[a-fA-F0-9]{40}$/.test(buyer)) return "Buyer must be a 20-byte hex address";
   if (isZeroAddress(buyer)) return "Buyer cannot be the zero address";
   if (sameAddress(input.seller, buyer)) return "Seller cannot issue a warranty to themselves";
+  if (!/^0x[a-fA-F0-9]{40}$/.test(issuer)) return "Issuer must be a 20-byte hex address";
+  if (isZeroAddress(issuer)) return "Issuer cannot be the zero address";
+  if (sameAddress(issuer, buyer)) return "Issuer cannot be the buyer";
+  if (!["MANUFACTURER", "REPAIRER", "INVOICE", "TELEMETRY", "INSPECTION"].includes(input.evidenceType)) {
+    return "evidence_type must be MANUFACTURER, REPAIRER, INVOICE, TELEMETRY, or INSPECTION";
+  }
   if (!input.productName.trim()) return "product_name is required";
   if (input.productName.trim().length > 200) return "product_name exceeds maximum length 200";
   if (!input.terms.trim()) return "terms is required";
@@ -144,34 +168,5 @@ export function validateCreateInputs(input: {
   const maxDur = Number(input.config?.maximum_duration ?? 3 * 365 * 24 * 60 * 60);
   if (input.durationSeconds < minDur) return "duration below minimum";
   if (input.durationSeconds > maxDur) return "duration above maximum";
-  return null;
-}
-
-export function validateEvidenceUrl(value: string): string | null {
-  const url = value.trim();
-  if (!url) return "evidence_url is required";
-  if (url.length > 500) return "evidence_url exceeds maximum length 500";
-  if (url.includes(",") || url.includes("\n") || url.includes("\\")) {
-    return "evidence_url must be a single HTTPS URL";
-  }
-  if (!url.toLowerCase().startsWith("https://")) return "evidence_url must start with https://";
-  const rest = url.split("://")[1] ?? "";
-  const authority = rest.split(/[/?#]/)[0] ?? "";
-  if (authority.includes("@")) return "Evidence URLs cannot contain user credentials";
-  const host = authority.includes("[")
-    ? authority.slice(authority.indexOf("[") + 1, authority.indexOf("]")).toLowerCase()
-    : authority.split(":")[0].toLowerCase();
-  if (
-    !host ||
-    host === "localhost" ||
-    host.endsWith(".localhost") ||
-    host.endsWith(".local") ||
-    host === "127.0.0.1" ||
-    host.startsWith("10.") ||
-    host.startsWith("192.168.") ||
-    host === "::1"
-  ) {
-    return "Private or local URLs are not allowed";
-  }
   return null;
 }

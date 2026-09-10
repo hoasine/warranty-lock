@@ -84,7 +84,7 @@ export function getStudioUrl(): string {
 export function getContractAddress(): string {
   return (
     process.env.NEXT_PUBLIC_CONTRACT_ADDRESS?.trim() ||
-    "0xCc7c65448cF0FAA3C2057e770D5cD29a5411892B"
+    "0xA6223E73bFEb2379bb146643214df568984cE095"
   );
 }
 
