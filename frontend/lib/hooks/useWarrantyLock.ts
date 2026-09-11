@@ -171,8 +171,46 @@ export function useWarrantyWrites() {
     attest: useWrite(
       client,
       invalidate,
-      (c, claimId: number, onProgress?: (p: TransactionProgress) => void) =>
-        c.attestClaim(claimId, onProgress)
+      (
+        c,
+        claimId: number,
+        evidenceType: string,
+        serialPreimage: string,
+        requested: bigint,
+        artifactHash: string,
+        artifactUri: string,
+        onProgress?: (p: TransactionProgress) => void
+      ) =>
+        c.attestClaim(
+          claimId,
+          evidenceType,
+          serialPreimage,
+          requested,
+          artifactHash,
+          artifactUri,
+          onProgress
+        )
+    ),
+    registerIssuer: useWrite(
+      client,
+      invalidate,
+      (
+        c,
+        issuer: string,
+        evidenceType: string,
+        credentialHash: string,
+        onProgress?: (p: TransactionProgress) => void
+      ) => c.registerIssuer(issuer, evidenceType, credentialHash, onProgress)
+    ),
+    revokeIssuer: useWrite(
+      client,
+      invalidate,
+      (
+        c,
+        issuer: string,
+        evidenceType: string,
+        onProgress?: (p: TransactionProgress) => void
+      ) => c.revokeIssuer(issuer, evidenceType, onProgress)
     ),
     respond: useWrite(
       client,

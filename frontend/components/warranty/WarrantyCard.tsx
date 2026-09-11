@@ -23,6 +23,8 @@ import {
   canRespondToClaim,
   canTimeoutClaim,
   nowEpoch,
+  validateArtifactUri,
+  validateSha256Hex,
 } from "@/lib/utils/guards";
 import { hashSerialPreimage } from "@/lib/utils/serial";
 import { error, success } from "@/lib/utils/toast";
@@ -40,6 +42,8 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
   const [reason, setReason] = useState("");
   const [serialPreimage, setSerialPreimage] = useState("");
   const [response, setResponse] = useState("");
+  const [artifactHash, setArtifactHash] = useState("");
+  const [artifactUri, setArtifactUri] = useState("");
   const [busy, setBusy] = useState(false);
 
   const minStake = asWei(config?.minimum_claim_stake ?? "10000000000000000");
@@ -152,6 +156,7 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
           <p className="text-muted-foreground">
             {openClaim.evidence_type}
             {openClaim.attested ? " · issuer attested" : " · waiting for issuer attest"}
+            {openClaim.artifact_hash ? ` · artifact ${openClaim.artifact_hash.slice(0, 12)}…` : ""}
           </p>
           <p className="text-muted-foreground">{openClaim.reason}</p>
           {openClaim.seller_response && (
@@ -182,9 +187,9 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
           </Button>
         )}
         {canAttest && liveClaim && (
-          <Button disabled={busy} onClick={() => run("Claim attested", () => writes.attest.mutateAsync([liveClaim.id]))}>
-            Attest as issuer
-          </Button>
+          <p className="text-xs text-muted-foreground">
+            Use the attest form below. The issuer cannot be the seller.
+          </p>
         )}
         {canApprove && openClaim && (
           <Button
@@ -239,8 +244,8 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
         <div className="soft-tile grid gap-3 p-4">
           <p className="text-sm font-medium">File a claim · stake exactly {formatGen(minStake)} GEN</p>
           <p className="text-xs text-muted-foreground">
-            Reason is narrative only. A COVERED payout requires the locked issuer wallet to attest
-            this claim. That authenticates the pinned key, not a manufacturer login or signed invoice.
+            Reason is narrative only. Coverage pays only after the registered issuer attests a
+            specific artifact hash. Validators re-fetch that file. This is not a manufacturer login.
           </p>
           <div className="space-y-2">
             <Label htmlFor={`req-${warranty.id}`}>Requested payout (GEN)</Label>
@@ -261,6 +266,65 @@ export function WarrantyCard({ warranty }: { warranty: WarrantyView }) {
           </div>
           <Button disabled={busy} onClick={onFile}>
             File claim
+          </Button>
+        </div>
+      )}
+
+      {canAttest && liveClaim && (
+        <div className="soft-tile grid gap-3 p-4">
+          <p className="text-sm font-medium">Attest as registered issuer</p>
+          <p className="text-xs text-muted-foreground">
+            This transaction commits evidence class {liveClaim.evidence_type}, serial{" "}
+            {liveClaim.serial_preimage}, amount {formatGen(liveClaim.requested_amount)} GEN, your
+            wallet, and the artifact hash. Validators fetch the HTTPS file and require the hash to
+            match.
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor={`art-uri-${warranty.id}`}>Artifact HTTPS URL</Label>
+            <Input
+              id={`art-uri-${warranty.id}`}
+              value={artifactUri}
+              onChange={(e) => setArtifactUri(e.target.value)}
+              placeholder="https://…"
+              maxLength={500}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`art-hash-${warranty.id}`}>Artifact SHA-256</Label>
+            <Input
+              id={`art-hash-${warranty.id}`}
+              value={artifactHash}
+              onChange={(e) => setArtifactHash(e.target.value)}
+              placeholder="64 hex characters"
+              maxLength={66}
+            />
+          </div>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              const uriProblem = validateArtifactUri(artifactUri);
+              if (uriProblem) {
+                error(uriProblem);
+                return;
+              }
+              const hashProblem = validateSha256Hex(artifactHash, "artifact_hash");
+              if (hashProblem) {
+                error(hashProblem);
+                return;
+              }
+              run("Claim attested", () =>
+                writes.attest.mutateAsync([
+                  liveClaim.id,
+                  liveClaim.evidence_type || warranty.evidence_type,
+                  liveClaim.serial_preimage,
+                  asWei(liveClaim.requested_amount),
+                  artifactHash.trim().toLowerCase().replace(/^0x/, ""),
+                  artifactUri.trim(),
+                ])
+              );
+            }}
+          >
+            Attest claim
           </Button>
         </div>
       )}

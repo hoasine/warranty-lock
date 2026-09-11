@@ -90,9 +90,11 @@ export function CreateWarrantyForm() {
       <h2 className="font-display text-xl font-semibold md:col-span-2">Offer a warranty</h2>
       <p className="text-sm text-muted-foreground md:col-span-2">
         You send exactly the coverage amount. The named buyer must accept before the activation
-        deadline. Claim stake later is exactly {minStake} GEN. Pin an issuer wallet and evidence
-        class now — a COVERED payout later requires that wallet to attest the claim. That
-        authenticates the pinned key, not a manufacturer login or signed invoice.
+        deadline. Claim stake later is exactly {minStake} GEN. The issuer must already be
+        registered by the independent registry admin for that evidence class. The issuer
+        cannot be you. A COVERED payout later requires that wallet to attest a specific
+        artifact hash. That authenticates the registered key and the committed bytes, not a
+        manufacturer login or signed invoice.
       </p>
       <div className="space-y-2">
         <Label htmlFor="buyer">Buyer address</Label>

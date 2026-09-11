@@ -25,6 +25,7 @@ function warranty(overrides: Partial<WarrantyView> = {}): WarrantyView {
     buyer,
     issuer,
     evidence_type: "INVOICE",
+    issuer_credential_hash: "b".repeat(64),
     product_name: "Unit",
     serial_hash: "a".repeat(64),
     terms: "terms",
@@ -56,6 +57,9 @@ function claim(overrides: Partial<WarrantyClaimView> = {}): WarrantyClaimView {
     reason: "failed",
     evidence_type: "INVOICE",
     serial_preimage: "WL-TEST-DEVICE-001",
+    artifact_hash: "",
+    artifact_uri: "",
+    commitment: "",
     attested: false,
     attested_at: 0,
     seller_response: "",
@@ -146,6 +150,7 @@ describe("warranty action guards", () => {
     assert.match(validateCreateInputs({ ...base, buyer: seller }) ?? "", /themselves/);
     assert.match(validateCreateInputs({ ...base, buyer: "0x" + "0".repeat(40) }) ?? "", /zero/);
     assert.match(validateCreateInputs({ ...base, issuer: buyer }) ?? "", /Issuer cannot be the buyer/);
+    assert.match(validateCreateInputs({ ...base, issuer: seller }) ?? "", /Issuer cannot be the seller/);
     assert.match(validateCreateInputs({ ...base, terms: "x".repeat(4001) }) ?? "", /terms/);
   });
 });

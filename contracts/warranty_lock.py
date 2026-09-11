@@ -2,11 +2,13 @@
 """
 WarrantyLock — per-product warranty escrow with deterministic claim settlement.
 
-The seller escrows a coverage limit for one buyer + serial hash and pins one
-issuer address plus evidence class. The buyer opts in, then may file sequential
-claims during the coverage term. A COVERED payout requires an on-chain
-attest_claim from that locked issuer wallet. That authenticates the pinned key,
-not a manufacturer login, signed invoice, or global brand PKI.
+A registry admin, distinct from any warranty seller, registers issuer wallets
+per evidence class plus a credential hash. The seller may only pin a registered
+issuer that is not the seller. A COVERED payout requires that issuer to call
+attest_claim with a claim-specific commitment (type, serial, amount, issuer,
+artifact hash). Validators re-fetch the artifact URI and require the SHA-256
+to match. That authenticates the registered key and the committed bytes, not a
+manufacturer login, signed PDF, or brand PKI.
 
 AI decides eligibility only: COVERED | NOT_COVERED | INCONCLUSIVE.
 Payout amounts are deterministic contract state, never supplied by the model.
@@ -27,12 +29,22 @@ class _Recipient:
 
 @allow_storage
 @dataclass
+class IssuerRecord:
+    wallet: Address
+    evidence_type: str
+    credential_hash: str
+    active: u256
+
+
+@allow_storage
+@dataclass
 class Warranty:
     id: u256
     seller: Address
     buyer: Address
     issuer: Address
     evidence_type: str
+    issuer_credential_hash: str
     product_name: str
     serial_hash: str
     terms: str
@@ -61,6 +73,9 @@ class WarrantyClaim:
     reason: str
     evidence_type: str
     serial_preimage: str
+    artifact_hash: str
+    artifact_uri: str
+    commitment: str
     attested: u256
     attested_at: u256
     seller_response: str
@@ -83,6 +98,8 @@ class WarrantyLock(gl.Contract):
     claims: TreeMap[u256, WarrantyClaim]
     seller_serial_index: TreeMap[str, u256]
     warranty_claim_index: TreeMap[str, u256]
+    issuers: TreeMap[str, IssuerRecord]
+    registry_admin: Address
     warranty_count: u256
     claim_count: u256
     minimum_claim_stake: u256
@@ -95,7 +112,8 @@ class WarrantyLock(gl.Contract):
     total_coverage_locked: u256
     total_claim_stakes_locked: u256
 
-    def __init__(self):
+    def __init__(self, registry_admin: Address):
+        self.registry_admin = self._as_address(registry_admin, "Registry admin")
         self.warranty_count = u256(0)
         self.claim_count = u256(0)
         self.minimum_claim_stake = u256(10_000_000_000_000_000)  # 0.01 GEN
@@ -163,6 +181,9 @@ class WarrantyLock(gl.Contract):
     def _serial_key(self, seller: Address, serial_hash: str) -> str:
         return f"{self._addr_hex(seller)}:{serial_hash}"
 
+    def _issuer_key(self, wallet: Address, evidence_type: str) -> str:
+        return f"{self._addr_hex(wallet)}:{str(evidence_type or '').upper().strip()}"
+
     def _clean_serial_hash(self, value: str) -> str:
         text = str(value or "").strip().lower()
         if text.startswith("0x"):
@@ -172,6 +193,17 @@ class WarrantyLock(gl.Contract):
         for ch in text:
             if ch not in "0123456789abcdef":
                 raise gl.vm.UserError("serial_hash must be hexadecimal")
+        return text
+
+    def _clean_sha256_hex(self, value: str, field: str) -> str:
+        text = str(value or "").strip().lower()
+        if text.startswith("0x"):
+            text = text[2:]
+        if len(text) != 64:
+            raise gl.vm.UserError(f"{field} must be exactly 32 bytes (64 hex characters)")
+        for ch in text:
+            if ch not in "0123456789abcdef":
+                raise gl.vm.UserError(f"{field} must be hexadecimal")
         return text
 
     def _hash_serial_preimage(self, value: str) -> str:
@@ -201,12 +233,133 @@ class WarrantyLock(gl.Contract):
             )
         return evidence_type
 
+    def _extract_host(self, url: str) -> str:
+        text = str(url or "").strip().lower()
+        if "://" not in text:
+            return ""
+        authority = text.split("://", 1)[1]
+        for separator in ("/", "?", "#"):
+            authority = authority.split(separator, 1)[0]
+        authority = authority.rsplit("@", 1)[-1]
+        if authority.startswith("[") and "]" in authority:
+            return authority[1 : authority.index("]")]
+        return authority.split(":", 1)[0]
+
+    def _is_private_host(self, host: str) -> bool:
+        value = str(host or "").strip().lower().rstrip(".")
+        if not value:
+            return True
+        if (
+            value == "localhost"
+            or value.endswith(".localhost")
+            or value.endswith(".local")
+        ):
+            return True
+        if value.startswith("::ffff:"):
+            return True
+        if ":" in value:
+            return (
+                value == "::1"
+                or value.startswith("fc")
+                or value.startswith("fd")
+                or value.startswith("fe8")
+                or value.startswith("fe9")
+                or value.startswith("fea")
+                or value.startswith("feb")
+            )
+        parts = value.split(".")
+        if len(parts) == 4:
+            try:
+                octets = [int(part) for part in parts]
+            except Exception:
+                return False
+            if any(part < 0 or part > 255 for part in octets):
+                return True
+            first, second = octets[0], octets[1]
+            return (
+                first in (0, 10, 127)
+                or (first == 169 and second == 254)
+                or (first == 172 and 16 <= second <= 31)
+                or (first == 192 and second == 168)
+            )
+        return False
+
+    def _clean_artifact_uri(self, value: str) -> str:
+        url = str(value or "").strip()
+        if not url:
+            raise gl.vm.UserError("artifact_uri is required")
+        if len(url) > 500:
+            raise gl.vm.UserError("artifact_uri exceeds maximum length 500")
+        if "," in url or "\n" in url or "\\" in url:
+            raise gl.vm.UserError("artifact_uri must be a single HTTPS URL")
+        lower = url.lower()
+        if not lower.startswith("https://"):
+            raise gl.vm.UserError("artifact_uri must start with https://")
+        authority = url.split("://", 1)[1]
+        for separator in ("/", "?", "#"):
+            authority = authority.split(separator, 1)[0]
+        if "@" in authority:
+            raise gl.vm.UserError("Artifact URLs cannot contain user credentials")
+        if self._is_private_host(self._extract_host(url)):
+            raise gl.vm.UserError("Private or local URLs are not allowed")
+        return url
+
+    def _hash_artifact_bytes(self, body: str) -> str:
+        import hashlib
+
+        return hashlib.sha256(str(body or "").encode("utf-8")).hexdigest()
+
+    def _verify_artifact_hash(self, uri: str, expected_hash: str) -> None:
+        def fetch_hash():
+            try:
+                raw = gl.nondet.web.render(uri, mode="text")
+                if isinstance(raw, dict):
+                    raw = raw.get("text") or ""
+                body = str(raw or "")
+                if not body.strip():
+                    return ""
+                return self._hash_artifact_bytes(body)
+            except Exception:
+                return ""
+
+        got = str(gl.eq_principle.strict_eq(fetch_hash)).strip().lower()
+        if not got:
+            raise gl.vm.UserError("Artifact could not be fetched")
+        if got != expected_hash:
+            raise gl.vm.UserError("Artifact hash does not match the fetched evidence")
+
+    def _commitment(
+        self,
+        evidence_type: str,
+        serial_preimage: str,
+        requested_amount: int,
+        issuer: Address,
+        artifact_hash: str,
+    ) -> str:
+        import hashlib
+
+        payload = (
+            f"{str(evidence_type).upper().strip()}|{str(serial_preimage).strip()}|"
+            f"{int(requested_amount)}|{self._addr_hex(issuer)}|{str(artifact_hash).lower()}"
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _require_registered(self, wallet: Address, evidence_type: str) -> IssuerRecord:
+        key = self._issuer_key(wallet, evidence_type)
+        if key not in self.issuers:
+            raise gl.vm.UserError("Issuer is not registered for this evidence type")
+        record = self.issuers[key]
+        if int(record.active) != 1:
+            raise gl.vm.UserError("Issuer is not registered for this evidence type")
+        return record
+
     def _issuer_attested(self, w: Warranty, cl: WarrantyClaim) -> bool:
         if int(cl.attested) != 1:
             return False
-        if str(cl.evidence_type or "").upper().strip() != str(w.evidence_type or "").upper().strip():
+        locked_type = str(w.evidence_type or "").upper().strip()
+        if str(cl.evidence_type or "").upper().strip() != locked_type:
             return False
-        if str(w.evidence_type or "").upper().strip() not in self._evidence_types():
+        if locked_type not in self._evidence_types():
             return False
         try:
             hashed = self._hash_serial_preimage(cl.serial_preimage)
@@ -216,7 +369,30 @@ class WarrantyLock(gl.Contract):
             return False
         if self._same_address(w.issuer, w.buyer):
             return False
+        if self._same_address(w.issuer, w.seller):
+            return False
         if self._addr_hex(w.issuer) == "0x" + ("0" * 40):
+            return False
+        try:
+            record = self._require_registered(w.issuer, locked_type)
+        except Exception:
+            return False
+        if str(record.credential_hash).lower() != str(w.issuer_credential_hash).lower():
+            return False
+        try:
+            artifact_hash = self._clean_sha256_hex(cl.artifact_hash, "artifact_hash")
+        except Exception:
+            return False
+        expected = self._commitment(
+            locked_type,
+            cl.serial_preimage,
+            int(cl.requested_amount),
+            w.issuer,
+            artifact_hash,
+        )
+        if str(cl.commitment).lower() != expected:
+            return False
+        if not str(cl.artifact_uri or "").strip():
             return False
         return True
 
@@ -248,7 +424,8 @@ class WarrantyLock(gl.Contract):
             f"accepted={int(w.accepted_at)};created={int(cl.created_at)};"
             f"requested={int(cl.requested_amount)};"
             f"type={cl.evidence_type};issuer={self._addr_hex(w.issuer)};"
-            f"serial={cl.serial_preimage};attested={int(cl.attested)}"
+            f"serial={cl.serial_preimage};attested={int(cl.attested)};"
+            f"artifact={cl.artifact_hash};commitment={cl.commitment}"
         )
 
     def _warranty_to_dict(self, w: Warranty) -> dict:
@@ -259,6 +436,7 @@ class WarrantyLock(gl.Contract):
             "buyer": self._addr_hex(w.buyer),
             "issuer": self._addr_hex(w.issuer),
             "evidence_type": w.evidence_type,
+            "issuer_credential_hash": w.issuer_credential_hash,
             "product_name": w.product_name,
             "serial_hash": w.serial_hash,
             "terms": w.terms,
@@ -297,6 +475,9 @@ class WarrantyLock(gl.Contract):
             "reason": cl.reason,
             "evidence_type": cl.evidence_type,
             "serial_preimage": cl.serial_preimage,
+            "artifact_hash": cl.artifact_hash,
+            "artifact_uri": cl.artifact_uri,
+            "commitment": cl.commitment,
             "attested": int(cl.attested) == 1,
             "attested_at": int(cl.attested_at),
             "seller_response": cl.seller_response,
@@ -314,6 +495,14 @@ class WarrantyLock(gl.Contract):
             "paid_out": int(cl.paid_out) == 1,
         }
 
+    def _issuer_to_dict(self, record: IssuerRecord) -> dict:
+        return {
+            "wallet": self._addr_hex(record.wallet),
+            "evidence_type": record.evidence_type,
+            "credential_hash": record.credential_hash,
+            "active": int(record.active) == 1,
+        }
+
     def _judge_prompt(self, w: Warranty, cl: WarrantyClaim) -> dict:
         import json
 
@@ -322,9 +511,7 @@ class WarrantyLock(gl.Contract):
             if cl.seller_response
             else "(Seller filed no response before the deadline.)"
         )
-        attested = int(cl.attested) == 1
-        # JSON escaping keeps attacker-controlled newlines, quotes, and delimiter
-        # text inside string values rather than allowing new prompt sections.
+        attested = self._issuer_attested(w, cl)
         case_json = json.dumps(
             {
                 "warranty_id": int(w.id),
@@ -334,7 +521,11 @@ class WarrantyLock(gl.Contract):
                 "locked_exclusions": w.exclusions,
                 "locked_evidence_type": w.evidence_type,
                 "locked_issuer": self._addr_hex(w.issuer),
+                "issuer_registered": attested,
                 "issuer_attested": attested,
+                "artifact_hash": cl.artifact_hash,
+                "artifact_uri": cl.artifact_uri,
+                "commitment": cl.commitment,
                 "buyer_claim_reason": cl.reason,
                 "serial_preimage": cl.serial_preimage,
                 "requested_amount": int(cl.requested_amount),
@@ -345,7 +536,8 @@ class WarrantyLock(gl.Contract):
         )
         prompt = f"""You are a neutral warranty-coverage arbitrator on GenLayer.
 Decide only whether the LOCKED warranty terms cover the incident. Reason text is
-narrative only. Issuer attestation is a pinned-wallet transaction, not a
+narrative only. Issuer attestation is a registered-wallet transaction that commits
+to an artifact hash. Validators already checked that hash. It is not a
 manufacturer login or signed invoice.
 
 IMPORTANT:
@@ -385,7 +577,7 @@ Rules:
         if verdict == "COVERED" and not attested:
             verdict = "INCONCLUSIVE"
         deterministic_reason = {
-            "COVERED": "Validator consensus classified the issuer-attested claim as covered by the locked terms.",
+            "COVERED": "Validator consensus classified the registered-issuer attested claim as covered by the locked terms.",
             "NOT_COVERED": "Validator consensus classified the claim as outside the locked terms.",
             "INCONCLUSIVE": "Validator consensus found the record insufficient for a covered payout.",
         }[verdict]
@@ -470,6 +662,33 @@ Rules:
         self._pay(cl.buyer, buyer_payment)
         self._pay(w.seller, seller_payment)
 
+    @gl.public.write
+    def register_issuer(
+        self, issuer: Address, evidence_type: str, credential_hash: str
+    ) -> None:
+        if not self._same_address(gl.message.sender_address, self.registry_admin):
+            raise gl.vm.UserError("Only the registry admin can register issuers")
+        wallet = self._as_address(issuer, "Issuer")
+        locked_type = self._clean_evidence_type(evidence_type)
+        cred = self._clean_sha256_hex(credential_hash, "credential_hash")
+        key = self._issuer_key(wallet, locked_type)
+        self.issuers[key] = IssuerRecord(
+            wallet=wallet,
+            evidence_type=locked_type,
+            credential_hash=cred,
+            active=u256(1),
+        )
+
+    @gl.public.write
+    def revoke_issuer(self, issuer: Address, evidence_type: str) -> None:
+        if not self._same_address(gl.message.sender_address, self.registry_admin):
+            raise gl.vm.UserError("Only the registry admin can revoke issuers")
+        wallet = self._as_address(issuer, "Issuer")
+        locked_type = self._clean_evidence_type(evidence_type)
+        record = self._require_registered(wallet, locked_type)
+        record.active = u256(0)
+        self.issuers[self._issuer_key(wallet, locked_type)] = record
+
     @gl.public.write.payable
     def create_warranty(
         self,
@@ -490,11 +709,14 @@ Rules:
             raise gl.vm.UserError("Seller cannot issue a warranty to themselves")
         if self._same_address(issuer_addr, buyer_addr):
             raise gl.vm.UserError("Issuer cannot be the buyer")
+        if self._same_address(issuer_addr, gl.message.sender_address):
+            raise gl.vm.UserError("Issuer cannot be the seller")
         product = self._require_text(product_name, "product_name", 200)
         locked_terms = self._require_text(terms, "terms", 4000)
         locked_exclusions = self._require_text(exclusions, "exclusions", 2500)
         locked_type = self._clean_evidence_type(evidence_type)
         serial = self._clean_serial_hash(serial_hash)
+        record = self._require_registered(issuer_addr, locked_type)
         coverage = int(coverage_limit)
         if coverage < int(self.minimum_claim_stake):
             raise gl.vm.UserError("coverage_limit must be >= minimum_claim_stake")
@@ -526,6 +748,7 @@ Rules:
             buyer=buyer_addr,
             issuer=issuer_addr,
             evidence_type=locked_type,
+            issuer_credential_hash=record.credential_hash,
             product_name=product,
             serial_hash=serial,
             terms=locked_terms,
@@ -623,6 +846,9 @@ Rules:
             reason=claim_reason,
             evidence_type=w.evidence_type,
             serial_preimage=serial_text,
+            artifact_hash="",
+            artifact_uri="",
+            commitment="",
             attested=u256(0),
             attested_at=u256(0),
             seller_response="",
@@ -654,20 +880,53 @@ Rules:
         )
 
     @gl.public.write
-    def attest_claim(self, claim_id: int) -> None:
-        """Locked issuer wallet attests this open claim; required before COVERED."""
+    def attest_claim(
+        self,
+        claim_id: int,
+        evidence_type: str,
+        serial_preimage: str,
+        requested_amount: int,
+        artifact_hash: str,
+        artifact_uri: str,
+    ) -> None:
+        """Registered issuer commits type+serial+amount+identity+artifact hash."""
         cl = self._require_claim(u256(int(claim_id)))
         w = self._require_warranty(cl.warranty_id)
+        if self._same_address(gl.message.sender_address, w.seller):
+            raise gl.vm.UserError("Seller cannot self-attest")
         if not self._same_address(gl.message.sender_address, w.issuer):
             raise gl.vm.UserError("Only the locked issuer can attest")
         if cl.status != "OPEN" or int(cl.paid_out) == 1:
             raise gl.vm.UserError("Claim is not open")
         if int(cl.attested) == 1:
             raise gl.vm.UserError("Issuer already attested")
-        if str(cl.evidence_type or "").upper().strip() != str(w.evidence_type or "").upper().strip():
+        locked_type = self._clean_evidence_type(evidence_type)
+        if locked_type != str(w.evidence_type or "").upper().strip():
             raise gl.vm.UserError("Claim evidence type does not match the locked issuer class")
-        if self._hash_serial_preimage(cl.serial_preimage) != w.serial_hash:
+        if locked_type != str(cl.evidence_type or "").upper().strip():
+            raise gl.vm.UserError("Claim evidence type does not match the locked issuer class")
+        serial_text = str(serial_preimage or "").strip()
+        if serial_text != str(cl.serial_preimage or "").strip():
+            raise gl.vm.UserError("Attest serial does not match the claim")
+        if self._hash_serial_preimage(serial_text) != w.serial_hash:
             raise gl.vm.UserError("serial_preimage does not match the locked serial hash")
+        if int(requested_amount) != int(cl.requested_amount):
+            raise gl.vm.UserError("Attest amount does not match the claim")
+        record = self._require_registered(w.issuer, locked_type)
+        if str(record.credential_hash).lower() != str(w.issuer_credential_hash).lower():
+            raise gl.vm.UserError("Issuer credential does not match the locked warranty")
+        hashed = self._clean_sha256_hex(artifact_hash, "artifact_hash")
+        uri = self._clean_artifact_uri(artifact_uri)
+        self._verify_artifact_hash(uri, hashed)
+        cl.artifact_hash = hashed
+        cl.artifact_uri = uri
+        cl.commitment = self._commitment(
+            locked_type,
+            serial_text,
+            int(cl.requested_amount),
+            w.issuer,
+            hashed,
+        )
         cl.attested = u256(1)
         cl.attested_at = self._now_epoch()
         cl.case_key = self._case_key(w, cl)
@@ -703,7 +962,7 @@ Rules:
             w,
             cl,
             "COVERED",
-            "Seller approved the issuer-attested claim without AI arbitration.",
+            "Seller approved the registered-issuer attested claim without AI arbitration.",
             10,
             "APPROVED",
         )
@@ -838,8 +1097,23 @@ Rules:
         return out
 
     @gl.public.view
+    def get_issuer(self, issuer: Address, evidence_type: str) -> dict:
+        wallet = self._as_address(issuer, "Issuer")
+        locked_type = self._clean_evidence_type(evidence_type)
+        key = self._issuer_key(wallet, locked_type)
+        if key not in self.issuers:
+            return {
+                "wallet": self._addr_hex(wallet),
+                "evidence_type": locked_type,
+                "credential_hash": "",
+                "active": False,
+            }
+        return self._issuer_to_dict(self.issuers[key])
+
+    @gl.public.view
     def get_protocol_config(self) -> dict:
         return {
+            "registry_admin": self._addr_hex(self.registry_admin),
             "minimum_claim_stake": int(self.minimum_claim_stake),
             "minimum_activation_window": int(self.minimum_activation_window),
             "maximum_activation_window": int(self.maximum_activation_window),

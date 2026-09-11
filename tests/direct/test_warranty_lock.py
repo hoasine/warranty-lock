@@ -18,12 +18,25 @@ SERIAL = hashlib.sha256(SERIAL_PLAIN.encode("utf-8")).hexdigest()
 SERIAL_PLAIN_2 = "WL-TEST-DEVICE-002"
 SERIAL_2 = hashlib.sha256(SERIAL_PLAIN_2.encode("utf-8")).hexdigest()
 EVIDENCE_TYPE = "INVOICE"
+EVIDENCE_TYPES = (
+    "MANUFACTURER",
+    "REPAIRER",
+    "INVOICE",
+    "TELEMETRY",
+    "INSPECTION",
+)
+CREDENTIAL = hashlib.sha256(b"registry-credential-invoice-v1").hexdigest()
+CREDENTIAL_B = hashlib.sha256(b"registry-credential-invoice-v2").hexdigest()
+ARTIFACT_BODY = "INVOICE serial=WL-TEST-DEVICE-001 amount=30000000000000000"
+ARTIFACT_HASH = hashlib.sha256(ARTIFACT_BODY.encode("utf-8")).hexdigest()
+ARTIFACT_URI = "https://evidence.example/invoice.txt"
 TERMS = (
     "Covers manufacturing defects in the power system during the coverage term. "
     "A covered claim pays the buyer's requested repair amount up to remaining coverage."
 )
 EXCLUSIONS = "Excludes intentional damage, unauthorized modification, and normal wear."
 _DIRECT_VM = None
+_ISSUER = None
 
 
 def _verdict(verdict: str) -> str:
@@ -36,13 +49,32 @@ def _verdict(verdict: str) -> str:
     )
 
 
+def _mock_artifact(direct_vm, body: str = ARTIFACT_BODY):
+    direct_vm.mock_web(
+        r"https://evidence\.example/.*",
+        {"method": "GET", "status": 200, "body": body},
+    )
+
+
+def _set_llm(direct_vm, verdict: str = "INCONCLUSIVE"):
+    direct_vm.clear_mocks()
+    _mock_artifact(direct_vm)
+    direct_vm.mock_llm(r".*", _verdict(verdict))
+
+
 @pytest.fixture
-def contract(direct_vm, direct_deploy, direct_alice):
-    global _DIRECT_VM
+def contract(direct_vm, direct_deploy, direct_alice, direct_owner, direct_charlie):
+    global _DIRECT_VM, _ISSUER
     _DIRECT_VM = direct_vm
+    _ISSUER = direct_charlie
+    direct_vm.sender = direct_owner
+    deployed = direct_deploy(CONTRACT, direct_owner, sdk_version=SDK_VERSION)
+    for evidence_type in EVIDENCE_TYPES:
+        deployed.register_issuer(direct_charlie, evidence_type, CREDENTIAL)
     direct_vm.sender = direct_alice
     direct_vm.mock_llm(r".*", _verdict("INCONCLUSIVE"))
-    return direct_deploy(CONTRACT, sdk_version=SDK_VERSION)
+    _mock_artifact(direct_vm)
+    return deployed
 
 
 def _payable(contract, method: str, *args, value: int):
@@ -65,7 +97,7 @@ def _create(
     issuer=None,
 ):
     if issuer is None:
-        issuer = _address_hex(_DIRECT_VM.sender)
+        issuer = _ISSUER if _ISSUER is not None else _address_hex(_DIRECT_VM.sender)
     return _payable(
         contract,
         "create_warranty",
@@ -109,11 +141,31 @@ def _file_claim(
     )
 
 
-def _attest(contract, direct_vm, issuer, claim_id: int = 0):
+def _attest(
+    contract,
+    direct_vm,
+    issuer=None,
+    claim_id: int = 0,
+    *,
+    evidence_type: str = EVIDENCE_TYPE,
+    serial: str = SERIAL_PLAIN,
+    requested: int = REQUEST,
+    artifact_hash: str = ARTIFACT_HASH,
+    artifact_uri: str = ARTIFACT_URI,
+):
     previous = direct_vm.sender
+    if issuer is None:
+        issuer = _ISSUER
     direct_vm.sender = issuer
     try:
-        contract.attest_claim(claim_id)
+        contract.attest_claim(
+            claim_id,
+            evidence_type,
+            serial,
+            requested,
+            artifact_hash,
+            artifact_uri,
+        )
     finally:
         direct_vm.sender = previous
 
@@ -288,7 +340,7 @@ class TestClaimAuthorizationAndWindows:
                 ACTIVATION,
                 DURATION,
                 EVIDENCE_TYPE,
-                direct_alice,
+                _ISSUER,
                 value=COVERAGE,
             )
         _create_and_accept(contract, direct_vm, direct_alice, direct_bob)
@@ -312,7 +364,7 @@ class TestClaimAuthorizationAndWindows:
         _file_claim(contract)
         with pytest.raises(Exception, match="already has an open claim"):
             _file_claim(contract)
-        _attest(contract, direct_vm, direct_alice)
+        _attest(contract, direct_vm)
         direct_vm.sender = direct_alice
         contract.approve_claim(0)
         direct_vm.sender = direct_bob
@@ -353,8 +405,7 @@ class TestResponseAndJudgment:
         with pytest.raises(Exception, match="Response window still open"):
             contract.judge_claim(0)
         contract.claims[0].response_deadline = contract.claims[0].created_at
-        direct_vm.clear_mocks()
-        direct_vm.mock_llm(r".*", _verdict("INCONCLUSIVE"))
+        _set_llm(direct_vm, "INCONCLUSIVE")
         contract.judge_claim(0)
         assert contract.get_claim(0)["verdict"] == "INCONCLUSIVE"
 
@@ -378,11 +429,10 @@ class TestResponseAndJudgment:
         _create_and_accept(contract, direct_vm, direct_alice, direct_bob)
         _file_claim(contract)
         if verdict == "COVERED":
-            _attest(contract, direct_vm, direct_alice)
+            _attest(contract, direct_vm)
         direct_vm.sender = direct_alice
         contract.respond_to_claim(0, "Seller response for adjudication.")
-        direct_vm.clear_mocks()
-        direct_vm.mock_llm(r".*", _verdict(verdict))
+        _set_llm(direct_vm, verdict)
         transfers = []
 
         class TransferRecorder:
@@ -422,15 +472,13 @@ class TestResponseAndJudgment:
     ):
         _create_and_accept(contract, direct_vm, direct_alice, direct_bob)
         _file_claim(contract)
-        _attest(contract, direct_vm, direct_alice)
+        _attest(contract, direct_vm)
         direct_vm.sender = direct_alice
         contract.respond_to_claim(0, "Seller response.")
-        direct_vm.clear_mocks()
-        direct_vm.mock_llm(r".*", _verdict("COVERED"))
+        _set_llm(direct_vm, "COVERED")
         contract.judge_claim(0)
 
-        direct_vm.clear_mocks()
-        direct_vm.mock_llm(r".*", _verdict("NOT_COVERED"))
+        _set_llm(direct_vm, "NOT_COVERED")
         assert direct_vm.run_validator() is False
 
     def test_invalid_ai_output_is_safe_inconclusive(
@@ -448,6 +496,7 @@ class TestResponseAndJudgment:
         )
         contract.claims[0].response_deadline = contract.claims[0].created_at
         direct_vm.clear_mocks()
+        _mock_artifact(direct_vm)
         direct_vm.mock_llm(
             r".*",
             json.dumps(
@@ -481,6 +530,7 @@ class TestResponseAndJudgment:
         )
         contract.claims[0].response_deadline = contract.claims[0].created_at
         direct_vm.clear_mocks()
+        _mock_artifact(direct_vm)
         direct_vm.mock_llm(
             r"(?s).*CASE_JSON:\n\{[^\n]+\}\n\nReturn JSON.*",
             _verdict("INCONCLUSIVE"),
@@ -493,7 +543,7 @@ class TestResponseAndJudgment:
     ):
         _create_and_accept(contract, direct_vm, direct_alice, direct_bob)
         _file_claim(contract)
-        _attest(contract, direct_vm, direct_alice)
+        _attest(contract, direct_vm)
         direct_vm.sender = direct_alice
         contract.approve_claim(0)
         claim = contract.get_claim(0)
@@ -539,7 +589,7 @@ class TestCloseAndIsolation:
         direct_vm.sender = direct_alice
         with pytest.raises(Exception, match="claim is open"):
             contract.close_warranty(0)
-        _attest(contract, direct_vm, direct_alice)
+        _attest(contract, direct_vm)
         contract.approve_claim(0)
         direct_vm.sender = direct_bob
         contract.close_warranty(0)
@@ -553,7 +603,7 @@ class TestCloseAndIsolation:
     ):
         _create_and_accept(contract, direct_vm, direct_alice, direct_bob)
         _file_claim(contract, requested=COVERAGE)
-        _attest(contract, direct_vm, direct_alice)
+        _attest(contract, direct_vm, requested=COVERAGE)
         direct_vm.sender = direct_alice
         contract.approve_claim(0)
         assert contract.get_warranty(0)["status"] == "EXHAUSTED"
@@ -562,19 +612,22 @@ class TestCloseAndIsolation:
             _file_claim(contract, requested=1)
 
     def test_cross_warranty_funds_remain_isolated(
-        self, contract, direct_vm, direct_alice, direct_bob, direct_charlie
+        self, contract, direct_vm, direct_alice, direct_bob, direct_charlie, direct_owner
     ):
         _create_and_accept(contract, direct_vm, direct_alice, direct_bob)
+        direct_vm.sender = direct_owner
+        contract.register_issuer(direct_bob, EVIDENCE_TYPE, CREDENTIAL)
         _create_and_accept(
             contract,
             direct_vm,
             direct_alice,
             direct_charlie,
             serial=SERIAL_2,
+            issuer=direct_bob,
         )
         direct_vm.sender = direct_bob
         _file_claim(contract, warranty_id=0, requested=REQUEST)
-        _attest(contract, direct_vm, direct_alice)
+        _attest(contract, direct_vm)
         direct_vm.sender = direct_alice
         contract.approve_claim(0)
         first = contract.get_warranty(0)
@@ -592,6 +645,8 @@ class TestIssuerAttestation:
     ):
         with pytest.raises(Exception, match="Issuer cannot be the buyer"):
             _create(contract, direct_bob, issuer=direct_bob)
+        with pytest.raises(Exception, match="Issuer cannot be the seller"):
+            _create(contract, direct_bob, issuer=direct_alice)
         with pytest.raises(Exception, match="zero address"):
             _create(contract, direct_bob, issuer="0x" + ("0" * 40))
         with pytest.raises(Exception, match="evidence_type"):
@@ -606,17 +661,31 @@ class TestIssuerAttestation:
         )
         _file_claim(contract)
         direct_vm.sender = direct_alice
-        with pytest.raises(Exception, match="Only the locked issuer"):
-            contract.attest_claim(0)
+        with pytest.raises(Exception, match="Seller cannot self-attest"):
+            contract.attest_claim(
+                0,
+                EVIDENCE_TYPE,
+                SERIAL_PLAIN,
+                REQUEST,
+                ARTIFACT_HASH,
+                ARTIFACT_URI,
+            )
         direct_vm.sender = direct_bob
         with pytest.raises(Exception, match="Only the locked issuer"):
-            contract.attest_claim(0)
-        _attest(contract, direct_vm, direct_charlie)
+            contract.attest_claim(
+                0,
+                EVIDENCE_TYPE,
+                SERIAL_PLAIN,
+                REQUEST,
+                ARTIFACT_HASH,
+                ARTIFACT_URI,
+            )
+        _attest(contract, direct_vm)
         claim = contract.get_claim(0)
         assert claim["attested"] is True
         assert claim["evidence_type"] == EVIDENCE_TYPE
         with pytest.raises(Exception, match="already attested"):
-            _attest(contract, direct_vm, direct_charlie)
+            _attest(contract, direct_vm)
 
     def test_approve_and_covered_require_issuer_attest(
         self, contract, direct_vm, direct_alice, direct_bob, direct_charlie
@@ -630,8 +699,7 @@ class TestIssuerAttestation:
             contract.approve_claim(0)
         direct_vm.sender = direct_alice
         contract.respond_to_claim(0, "Seller response.")
-        direct_vm.clear_mocks()
-        direct_vm.mock_llm(r".*", _verdict("COVERED"))
+        _set_llm(direct_vm, "COVERED")
         contract.judge_claim(0)
         assert contract.get_claim(0)["verdict"] == "INCONCLUSIVE"
         assert contract.get_warranty(0)["coverage_remaining"] == COVERAGE
@@ -651,11 +719,82 @@ class TestIssuerAttestation:
             contract, direct_vm, direct_alice, direct_bob, issuer=direct_charlie
         )
         _file_claim(contract)
-        _attest(contract, direct_vm, direct_charlie)
+        _attest(contract, direct_vm)
         direct_vm.sender = direct_alice
         contract.respond_to_claim(0, "Seller response.")
-        direct_vm.clear_mocks()
-        direct_vm.mock_llm(r".*", _verdict("COVERED"))
+        _set_llm(direct_vm, "COVERED")
         contract.judge_claim(0)
         assert contract.get_claim(0)["verdict"] == "COVERED"
         assert contract.get_warranty(0)["coverage_remaining"] == COVERAGE - REQUEST
+
+
+class TestRegistryAndAdversarialEvidence:
+    def test_only_registry_admin_can_register(
+        self, contract, direct_vm, direct_alice, direct_bob, direct_owner
+    ):
+        direct_vm.sender = direct_alice
+        with pytest.raises(Exception, match="Only the registry admin"):
+            contract.register_issuer(direct_bob, EVIDENCE_TYPE, CREDENTIAL)
+        config = contract.get_protocol_config()
+        assert _address_hex(config["registry_admin"]) == _address_hex(direct_owner)
+
+    def test_unauthorized_issuer_cannot_be_pinned(
+        self, contract, direct_alice, direct_bob
+    ):
+        stranger = "0x" + ("55" * 20)
+        with pytest.raises(Exception, match="not registered"):
+            _create(contract, direct_bob, issuer=stranger)
+
+    def test_altered_amount_is_rejected(
+        self, contract, direct_vm, direct_alice, direct_bob, direct_charlie
+    ):
+        _create_and_accept(contract, direct_vm, direct_alice, direct_bob)
+        _file_claim(contract)
+        with pytest.raises(Exception, match="Attest amount does not match"):
+            _attest(contract, direct_vm, direct_charlie, requested=REQUEST + 1)
+
+    def test_altered_evidence_hash_is_rejected(
+        self, contract, direct_vm, direct_alice, direct_bob, direct_charlie
+    ):
+        _create_and_accept(contract, direct_vm, direct_alice, direct_bob)
+        _file_claim(contract)
+        direct_vm.clear_mocks()
+        _mock_artifact(direct_vm, body=ARTIFACT_BODY + " TAMPERED")
+        direct_vm.mock_llm(r".*", _verdict("INCONCLUSIVE"))
+        with pytest.raises(Exception, match="does not match the fetched evidence"):
+            _attest(contract, direct_vm)
+
+    def test_credential_mismatch_blocks_attest(
+        self,
+        contract,
+        direct_vm,
+        direct_alice,
+        direct_bob,
+        direct_charlie,
+        direct_owner,
+    ):
+        _create_and_accept(contract, direct_vm, direct_alice, direct_bob)
+        _file_claim(contract)
+        direct_vm.sender = direct_owner
+        contract.register_issuer(direct_charlie, EVIDENCE_TYPE, CREDENTIAL_B)
+        with pytest.raises(Exception, match="credential does not match"):
+            _attest(contract, direct_vm)
+
+    def test_revoked_issuer_cannot_attest(
+        self,
+        contract,
+        direct_vm,
+        direct_alice,
+        direct_bob,
+        direct_charlie,
+        direct_owner,
+    ):
+        _create_and_accept(contract, direct_vm, direct_alice, direct_bob)
+        _file_claim(contract)
+        direct_vm.sender = direct_owner
+        contract.revoke_issuer(direct_charlie, EVIDENCE_TYPE)
+        with pytest.raises(Exception, match="not registered"):
+            _attest(contract, direct_vm)
+        issuer = contract.get_issuer(direct_charlie, EVIDENCE_TYPE)
+        assert issuer["active"] is False
+

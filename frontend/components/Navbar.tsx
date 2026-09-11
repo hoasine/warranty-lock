@@ -28,7 +28,7 @@ export function Navbar() {
             <span className="text-lg font-bold">WarrantyLock</span>
           </Link>
           <p className="hidden text-sm text-muted-foreground md:block">
-            Escrow coverage. Pin an issuer. AI decides eligibility only.
+            Escrow coverage. Register an issuer. AI decides eligibility only.
           </p>
           <AccountPanel />
         </div>

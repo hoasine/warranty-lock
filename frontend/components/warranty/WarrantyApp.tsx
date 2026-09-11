@@ -7,6 +7,7 @@ import { RateLimitNotice } from "@/components/RateLimitNotice";
 import { CreateWarrantyForm } from "@/components/warranty/CreateWarrantyForm";
 import { HowItWorks } from "@/components/warranty/HowItWorks";
 import { LiabilitiesPanel } from "@/components/warranty/LiabilitiesPanel";
+import { RegisterIssuerForm } from "@/components/warranty/RegisterIssuerForm";
 import { WarrantyCard } from "@/components/warranty/WarrantyCard";
 import { useWarranties, type WarrantyFilter } from "@/lib/hooks/useWarrantyLock";
 import { getContractAddress } from "@/lib/genlayer/client";
@@ -29,6 +30,7 @@ export function WarrantyApp() {
       <HowItWorks />
       {configured && <LiabilitiesPanel />}
       {configured && <RateLimitNotice />}
+      {configured && <RegisterIssuerForm />}
       {configured && <CreateWarrantyForm />}
       {configured && (
         <section className="space-y-4">

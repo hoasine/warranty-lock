@@ -149,6 +149,7 @@ export function validateCreateInputs(input: {
   if (!/^0x[a-fA-F0-9]{40}$/.test(issuer)) return "Issuer must be a 20-byte hex address";
   if (isZeroAddress(issuer)) return "Issuer cannot be the zero address";
   if (sameAddress(issuer, buyer)) return "Issuer cannot be the buyer";
+  if (sameAddress(issuer, input.seller)) return "Issuer cannot be the seller";
   if (!["MANUFACTURER", "REPAIRER", "INVOICE", "TELEMETRY", "INSPECTION"].includes(input.evidenceType)) {
     return "evidence_type must be MANUFACTURER, REPAIRER, INVOICE, TELEMETRY, or INSPECTION";
   }
@@ -168,5 +169,43 @@ export function validateCreateInputs(input: {
   const maxDur = Number(input.config?.maximum_duration ?? 3 * 365 * 24 * 60 * 60);
   if (input.durationSeconds < minDur) return "duration below minimum";
   if (input.durationSeconds > maxDur) return "duration above maximum";
+  return null;
+}
+
+export function canRegisterIssuer(
+  address?: string | null,
+  registryAdmin?: string | null
+): boolean {
+  return Boolean(address && registryAdmin && sameAddress(address, registryAdmin));
+}
+
+export function validateArtifactUri(url: string): string | null {
+  const value = url.trim();
+  if (!value) return "artifact_uri is required";
+  if (value.length > 500) return "artifact_uri exceeds maximum length 500";
+  if (!value.toLowerCase().startsWith("https://")) return "artifact_uri must start with https://";
+  if (value.includes("@")) return "Artifact URLs cannot contain user credentials";
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    if (
+      host === "localhost" ||
+      host.endsWith(".localhost") ||
+      host.endsWith(".local") ||
+      host === "127.0.0.1" ||
+      host === "::1"
+    ) {
+      return "Private or local URLs are not allowed";
+    }
+  } catch {
+    return "artifact_uri must be a valid HTTPS URL";
+  }
+  return null;
+}
+
+export function validateSha256Hex(value: string, field: string): string | null {
+  const text = value.trim().toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{64}$/.test(text)) {
+    return `${field} must be exactly 32 bytes (64 hex characters)`;
+  }
   return null;
 }

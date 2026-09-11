@@ -13,7 +13,7 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata: Metadata = {
   title: "WarrantyLock — Escrowed warranty claims",
   description:
-    "Sellers escrow coverage for one buyer and serial, and pin an issuer wallet. A COVERED payout requires that issuer to attest the claim. AI decides eligibility only; the contract pays the requested amount. This authenticates the pinned key, not a manufacturer login.",
+    "Sellers escrow coverage for one buyer and serial, and may pin only a registered issuer wallet. A COVERED payout requires that issuer to attest a claim-specific artifact hash. AI decides eligibility only; the contract pays the requested amount. This authenticates the registered key, not a manufacturer login.",
   icons: { icon: [{ url: "/favicon.svg", type: "image/svg+xml" }] },
 };
 

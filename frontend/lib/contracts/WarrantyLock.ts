@@ -17,6 +17,7 @@ export type WarrantyView = {
   buyer: string;
   issuer: string;
   evidence_type: string;
+  issuer_credential_hash: string;
   product_name: string;
   serial_hash: string;
   terms: string;
@@ -45,6 +46,9 @@ export type WarrantyClaimView = {
   reason: string;
   evidence_type: string;
   serial_preimage: string;
+  artifact_hash: string;
+  artifact_uri: string;
+  commitment: string;
   attested: boolean;
   attested_at: number;
   seller_response: string;
@@ -63,6 +67,7 @@ export type WarrantyClaimView = {
 };
 
 export type ProtocolConfig = {
+  registry_admin: string;
   minimum_claim_stake: number | string;
   minimum_activation_window: number | string;
   maximum_activation_window: number | string;
@@ -72,6 +77,13 @@ export type ProtocolConfig = {
   judge_grace_window: number | string;
   warranty_count: number | string;
   claim_count: number | string;
+};
+
+export type IssuerView = {
+  wallet: string;
+  evidence_type: string;
+  credential_hash: string;
+  active: boolean;
 };
 
 export type Liabilities = {
@@ -373,6 +385,38 @@ export class WarrantyLockClient {
     return normalizeReadResult<Liabilities>(raw);
   }
 
+  async getIssuer(issuer: string, evidenceType: string): Promise<IssuerView> {
+    const raw = await this.readClient.readContract({
+      address: this.contractAddress,
+      functionName: "get_issuer",
+      args: [issuer, evidenceType],
+    });
+    return normalizeReadResult<IssuerView>(raw);
+  }
+
+  registerIssuer(
+    issuer: string,
+    evidenceType: string,
+    credentialHash: string,
+    onProgress?: (progress: TransactionProgress) => void
+  ) {
+    return this.write(
+      "register_issuer",
+      [issuer, evidenceType, credentialHash],
+      0n,
+      FAST_TX_WAIT,
+      onProgress
+    );
+  }
+
+  revokeIssuer(
+    issuer: string,
+    evidenceType: string,
+    onProgress?: (progress: TransactionProgress) => void
+  ) {
+    return this.write("revoke_issuer", [issuer, evidenceType], 0n, FAST_TX_WAIT, onProgress);
+  }
+
   createWarranty(
     buyer: string,
     productName: string,
@@ -431,8 +475,29 @@ export class WarrantyLockClient {
     );
   }
 
-  attestClaim(claimId: number, onProgress?: (progress: TransactionProgress) => void) {
-    return this.write("attest_claim", [claimId], 0n, FAST_TX_WAIT, onProgress);
+  attestClaim(
+    claimId: number,
+    evidenceType: string,
+    serialPreimage: string,
+    requestedAmountWei: bigint,
+    artifactHash: string,
+    artifactUri: string,
+    onProgress?: (progress: TransactionProgress) => void
+  ) {
+    return this.write(
+      "attest_claim",
+      [
+        claimId,
+        evidenceType,
+        serialPreimage,
+        requestedAmountWei.toString(),
+        artifactHash,
+        artifactUri,
+      ],
+      0n,
+      FAST_TX_WAIT,
+      onProgress
+    );
   }
 
   respondToClaim(
